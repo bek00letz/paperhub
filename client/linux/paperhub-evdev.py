@@ -19,11 +19,10 @@ DEVICE_ID = os.environ.get("PAPERHUB_DEVICE", "kindle_pw")
 INPUT_DEV = os.environ.get("PAPERHUB_INPUT", "/dev/input/event0")
 FRAME_TMP = "/tmp/paperhub_frame.png"
 
-# Linux input_event struct format: timeval (tv_sec, tv_usec), type, code, value
-# On 32-bit ARM (Kindle/Kobo): IIHHi (16 bytes) or lli (long/long/int)
-# On 64-bit: qqHHi (24 bytes)
-EVENT_FORMAT_32 = "IIHHi"
-EVENT_SIZE_32 = struct.calcsize(EVENT_FORMAT_32)
+# Detect input_event struct packing (32-bit vs 64-bit / y2038)
+is_64bit = sys.maxsize > 2**32
+EVENT_FORMAT = "qqHHi" if is_64bit else "IIHHi"
+EVENT_SIZE = struct.calcsize(EVENT_FORMAT)
 
 EV_ABS = 0x03
 EV_SYN = 0x00
@@ -105,10 +104,10 @@ def main():
     cur_x, cur_y = 0, 0
     with open(INPUT_DEV, "rb") as ev_file:
         while True:
-            data = ev_file.read(EVENT_SIZE_32)
-            if not data or len(data) < EVENT_SIZE_32:
+            data = ev_file.read(EVENT_SIZE)
+            if not data or len(data) < EVENT_SIZE:
                 continue
-            tv_sec, tv_usec, ev_type, ev_code, ev_val = struct.unpack(EVENT_FORMAT_32, data)
+            tv_sec, tv_usec, ev_type, ev_code, ev_val = struct.unpack(EVENT_FORMAT, data)
 
             if ev_type == EV_ABS:
                 if ev_code in (ABS_X, ABS_MT_POSITION_X):

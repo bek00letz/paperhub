@@ -465,8 +465,19 @@ def draw_card(draw, box, radius=20, fill=WHITE, outline=GRAY_BORDER, width=1, sh
         Outer radius = radius
         Inner content radius = radius - padding
     """
-    x0, y0, x1, y1 = box
-    if shadow:
+    if len(box) == 2 and isinstance(box[0], (tuple, list)):
+        (x0, y0), (x1, y1) = box
+    elif len(box) == 4:
+        x0, y0, x1, y1 = box
+    else:
+        raise ValueError(f"Invalid bounding box format: {box!r}")
+
+    if x1 <= x0 or y1 <= y0:
+        return
+
+    radius = max(0, min(radius, (x1 - x0) // 2, (y1 - y0) // 2))
+
+    if shadow and (x1 - x0) > 6 and (y1 - y0) > 6:
         # Delicate 2-step ambient drop shadow (soft 16-level grayscale elevation)
         # Layer 1: ambient spread
         draw.rounded_rectangle(
@@ -488,6 +499,9 @@ def draw_concentric_badge(draw, parent_radius, padding, box, fill=BLACK, text=""
     """Draw a child badge maintaining mathematical concentricity: R_inner = R_outer - padding."""
     r_inner = max(4, parent_radius - padding)
     bx0, by0, bx1, by1 = box
+    if bx1 <= bx0 or by1 <= by0:
+        return
+    r_inner = min(r_inner, (bx1 - bx0) // 2, (by1 - by0) // 2)
     draw.rounded_rectangle([(bx0, by0), (bx1, by1)], radius=r_inner, fill=fill)
     if text and font:
         mid_x = (bx0 + bx1) // 2

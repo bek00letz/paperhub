@@ -33,15 +33,16 @@ draw_frame() {
 }
 
 fetch_frame() {
-    ETAG_HDR=""
+    PREV_ETAG=""
     if [ -f "$ETAG_FILE" ]; then
         PREV_ETAG=$(cat "$ETAG_FILE" 2>/dev/null | tr -d '\r\n"')
-        if [ -n "$PREV_ETAG" ]; then
-            ETAG_HDR="-H If-None-Match: \"$PREV_ETAG\""
-        fi
     fi
 
-    HTTP_STATUS=$(curl -s -m 10 -D "$HEADERS_FILE" $ETAG_HDR "$SERVER_URL/api/devices/$DEVICE_ID/frame.png" -o "${FRAME_TMP}.new" -w "%{http_code}")
+    if [ -n "$PREV_ETAG" ]; then
+        HTTP_STATUS=$(curl -s -m 10 -D "$HEADERS_FILE" -H "If-None-Match: \"$PREV_ETAG\"" "$SERVER_URL/api/devices/$DEVICE_ID/frame.png" -o "${FRAME_TMP}.new" -w "%{http_code}")
+    else
+        HTTP_STATUS=$(curl -s -m 10 -D "$HEADERS_FILE" "$SERVER_URL/api/devices/$DEVICE_ID/frame.png" -o "${FRAME_TMP}.new" -w "%{http_code}")
+    fi
     
     if [ "$HTTP_STATUS" = "304" ]; then
         # Content unchanged: skip disk write and e-ink refresh to preserve battery
@@ -106,8 +107,12 @@ if command -v evtest >/dev/null 2>&1; then
             *"SYN_REPORT"*)
                 if [ "$CUR_X" -gt 0 ] && [ "$CUR_Y" -gt 0 ]; then
                     log "Touch tap: ($CUR_X, $CUR_Y)"
-                    curl -s -X POST -m 4 "$SERVER_URL/api/devices/$DEVICE_ID/touch?x=$CUR_X&y=$CUR_Y&format=png" -o "$FRAME_TMP" 2>/dev/null
-                    draw_frame
+                    if curl -s -X POST -m 4 "$SERVER_URL/api/devices/$DEVICE_ID/touch?x=$CUR_X&y=$CUR_Y&format=png" -o "${FRAME_TMP}.touch" 2>/dev/null && [ -s "${FRAME_TMP}.touch" ]; then
+                        mv "${FRAME_TMP}.touch" "$FRAME_TMP"
+                        draw_frame
+                    else
+                        rm -f "${FRAME_TMP}.touch"
+                    fi
                     CUR_X=0
                     CUR_Y=0
                 fi
@@ -121,8 +126,12 @@ else
         # On tap interrupt, trigger quick touch check
         dd if="$INPUT_DEV" bs=16 count=1 >/dev/null 2>&1
         log "Touch detected"
-        curl -s -X POST -m 4 "$SERVER_URL/api/devices/$DEVICE_ID/touch?gesture=tap&format=png" -o "$FRAME_TMP" 2>/dev/null
-        draw_frame
+        if curl -s -X POST -m 4 "$SERVER_URL/api/devices/$DEVICE_ID/touch?gesture=tap&format=png" -o "${FRAME_TMP}.touch" 2>/dev/null && [ -s "${FRAME_TMP}.touch" ]; then
+            mv "${FRAME_TMP}.touch" "$FRAME_TMP"
+            draw_frame
+        else
+            rm -f "${FRAME_TMP}.touch"
+        fi
         sleep 0.2
     done
 fi

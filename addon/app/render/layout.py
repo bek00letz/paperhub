@@ -245,27 +245,25 @@ def _draw_dynamic_grid(img, draw, el, vals=None, display=None):
     """Render responsive 2D matrix of interactive entity cards."""
     x, y, w, h = _clamp_box(el, default_w=600, default_h=400, display=display)
     raw_items = el.get("items", [])
+    parsed_items = []
     if isinstance(vals, str):
         try:
             parsed = json.loads(vals)
             if isinstance(parsed, list):
-                items = parsed
-            else:
-                items = raw_items
+                parsed_items = parsed
         except Exception:
-            items = raw_items
+            pass
     elif isinstance(vals, list):
-        items = vals
-    else:
-        items = raw_items
+        parsed_items = vals
 
-    # Filter active items
+    # Merge resolved values with original element configuration
     active_items = []
-    for it in items:
-        if isinstance(it, dict):
-            active_items.append(it)
-        elif isinstance(it, str):
-            active_items.append({"entity": it, "name": it.split(".")[-1].replace("_", " ").title(), "state": "on"})
+    for idx, raw_it in enumerate(raw_items):
+        cfg = dict(raw_it) if isinstance(raw_it, dict) else {"entity": str(raw_it)}
+        if idx < len(parsed_items) and isinstance(parsed_items[idx], dict):
+            # Overlay live state, name, and changed timestamp while retaining icon and actions
+            cfg.update({k: v for k, v in parsed_items[idx].items() if v is not None and v != ""})
+        active_items.append(cfg)
 
     n = len(active_items)
     if n == 0:
@@ -638,6 +636,8 @@ def _format_day_label(val, idx):
 def _draw_calendar_timeline(img, draw, el, val, display=None):
     """Draw an Apple-standard agenda timeline displaying upcoming events."""
     x, y, w, h = _clamp_box(el, default_w=600, default_h=360, display=display)
+    if w < 60 or h < 60:
+        return
     radius = int(el.get("radius", 20))
     title = str(el.get("title") or "Today's Schedule")
     max_events = int(el.get("max_events", 4))
@@ -757,6 +757,8 @@ def _draw_calendar_timeline(img, draw, el, val, display=None):
 def _draw_weather_forecast(img, draw, el, val, display=None):
     """Draw an Apple-standard multi-day weather forecast matrix."""
     x, y, w, h = _clamp_box(el, default_w=600, default_h=260, display=display)
+    if w < 60 or h < 60:
+        return
     radius = int(el.get("radius", 20))
     title = str(el.get("title") or "5-Day Forecast")
     max_days = int(el.get("days", 5))
@@ -1498,25 +1500,34 @@ def render_page(
     img, d = T.new_canvas(orientation=orientation, display=display)
     elements = page.get("elements", [])
 
+    TILE_TYPES = {
+        "tile", "light_tile", "switch_tile", "sensor_tile",
+        "climate_tile", "media_tile", "action_tile", "icon"
+    }
+    WIDGET_TYPES = {
+        "dynamic_grid", "calendar_timeline", "weather_forecast",
+        "flight_tracker", "flight_radar", "sports_racing", "sports_match"
+    }
+
     for i, el in enumerate(elements):
-        drawer = DRAWERS.get(el.get("type"))
+        el_type = el.get("type")
+        drawer = DRAWERS.get(el_type)
         if drawer is None:
             continue
         try:
-            if el["type"] == "curve":
+            if el_type == "curve":
                 drawer(img, d, el, "", (series or {}).get(i), display=display)
-            elif el["type"] in ("text", "number"):
+            elif el_type in ("text", "number"):
                 got = []
                 drawer(img, d, el, element_text(el, vals, i), got, distance_m=distance_m, display=display)
                 if metrics is not None and got:
-                    entry = {"i": i, **got[0]}
-                    metrics.append(entry)
-            elif el["type"] in ("dynamic_grid", "calendar_timeline", "weather_forecast", "flight_tracker", "flight_radar", "sports_racing", "sports_match"):
+                    metrics.append({"i": i, **got[0]})
+            elif el_type in WIDGET_TYPES or el_type in TILE_TYPES:
                 drawer(img, d, el, vals.get(i), display=display)
             else:
                 drawer(img, d, el, element_text(el, vals, i), display=display)
-        except Exception:
-            # One bad element must never crash the page
+        except Exception as exc:
+            print(f"[PaperHub] Warning: element {i} ({el_type}) failed to render: {exc!r}", flush=True)
             continue
 
     # Prominent book-turn navigation chevrons (half the screen tall & edge-width wide)
@@ -1735,11 +1746,11 @@ def collect_templates(page):
                 out[i] = str(raw_val)
             elif ent and ("." in ent):
                 out[i] = (
-                    "{"
+                    "{{ {"
                     f"'entity': '{binding._quote(ent)}', "
                     f"'state': states('{binding._quote(ent)}'), "
                     f"'attributes': (states['{binding._quote(ent)}'].attributes if states['{binding._quote(ent)}'] is defined else {{}})"
-                    "} | to_json"
+                    "} | to_json }}"
                 )
         elif el.get("type") in ("sports_racing", "sports_match"):
             ent = str(el.get("entity") or "").strip()
@@ -1748,10 +1759,10 @@ def collect_templates(page):
                 out[i] = str(raw_val)
             elif ent and ("." in ent):
                 out[i] = (
-                    "{"
+                    "{{ {"
                     f"'entity': '{binding._quote(ent)}', "
                     f"'state': states('{binding._quote(ent)}'), "
                     f"'attributes': (states['{binding._quote(ent)}'].attributes if states['{binding._quote(ent)}'] is defined else {{}})"
-                    "} | to_json"
+                    "} | to_json }}"
                 )
     return out

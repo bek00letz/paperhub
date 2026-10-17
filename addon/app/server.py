@@ -72,6 +72,7 @@ PAGE_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 _entity_cache = {"at": 0.0, "items": []}
 _fixture_cache = None
 SHARED_SESSION: aiohttp.ClientSession | None = None
+IS_LAN_PANEL = getattr(web, "AppKey", lambda name, t: name)("is_lan_panel", bool)
 
 
 def valid_entity_id(eid: str) -> bool:
@@ -385,9 +386,6 @@ async def fetch_overhead_aircraft(session, radius_km=35.0):
 async def fetch_weather_forecast(session, entity_id, fallback=None):
     eid = str(entity_id or "weather.home").strip()
     now = time.time()
-    cached = _weather_cache.get(eid)
-    if cached and (now - cached["at"] < 600):
-        return cached["data"]
 
     base_data = {}
     if isinstance(fallback, dict):
@@ -397,6 +395,15 @@ async def fetch_weather_forecast(session, entity_id, fallback=None):
             base_data = json.loads(fallback)
         except Exception:
             pass
+
+    cached = _weather_cache.get(eid)
+    if cached and (now - cached["at"] < 600):
+        data = dict(cached["data"])
+        if isinstance(base_data, dict):
+            for k in ("temperature", "condition"):
+                if k in base_data and base_data[k]:
+                    data[k] = base_data[k]
+        return data
 
     if HA_TOKEN and session:
         try:
@@ -850,8 +857,13 @@ def compute_device_next_wake_seconds(dev: DeviceSession, ha_states: dict | None 
     if dev.quiet_hours_enabled:
         # 1. Custom HA entity trigger check (e.g. input_boolean.sleep_mode)
         if dev.quiet_hours_entity:
-            states = ha_states if ha_states is not None else load_fixture().get("states", {})
-            st_obj = states.get(dev.quiet_hours_entity) or {}
+            states_dict = ha_states
+            if states_dict is None:
+                if isinstance(_entity_cache, dict) and _entity_cache.get("items"):
+                    states_dict = {e["entity_id"]: e for e in _entity_cache["items"]}
+                else:
+                    states_dict = load_fixture().get("states", {})
+            st_obj = states_dict.get(dev.quiet_hours_entity) or {}
             st_val = str(st_obj.get("state") or "").strip().lower()
             if st_val in ("on", "true", "sleep", "sleeping", "active", "night", "not_home"):
                 is_quiet = True
@@ -912,6 +924,9 @@ def page_has_entity(page: dict, entity_id: str) -> bool:
     return False
 
 
+MAX_DEVICES = 32
+
+
 class DeviceManager:
     """Manages active e-readers and persistent profiles."""
 
@@ -945,6 +960,9 @@ class DeviceManager:
     def get_or_create(self, device_id: str) -> DeviceSession:
         dev_id = re.sub(r"[^a-zA-Z0-9_-]+", "", str(device_id or "default").strip()) or "default"
         if dev_id not in self.devices:
+            if len(self.devices) >= MAX_DEVICES:
+                # Return default session to prevent unbounded memory and storage growth
+                return self.devices.get("default") or DeviceSession("default")
             self.devices[dev_id] = DeviceSession(dev_id, {"name": f"Device {dev_id}"})
             self.save()
         dev = self.devices[dev_id]
@@ -1095,7 +1113,22 @@ async def handle_touch(session, dev: DeviceSession, spec: dict, x: float, y: flo
 def check_token(request):
     if not FRAME_TOKEN:
         return True
-    return hmac.compare_digest(request.query.get("token", ""), FRAME_TOKEN)
+
+    # 1. Check Bearer Authorization Header
+    auth_hdr = request.headers.get("Authorization", "")
+    if auth_hdr.lower().startswith("bearer "):
+        token = auth_hdr[7:].strip()
+        if hmac.compare_digest(token, FRAME_TOKEN):
+            return True
+
+    # 2. Check Custom Header
+    custom_hdr = request.headers.get("X-PaperHub-Token") or request.headers.get("Access-Token")
+    if custom_hdr and hmac.compare_digest(custom_hdr.strip(), FRAME_TOKEN):
+        return True
+
+    # 3. Check Query Parameter
+    query_token = request.query.get("token", "")
+    return bool(query_token and hmac.compare_digest(query_token, FRAME_TOKEN))
 
 
 async def frame_png(request):
@@ -1259,6 +1292,8 @@ async def api_touch(request):
 
     # If the visual editor sent its live in-memory page for simulation:
     if client_page and isinstance(client_page, dict):
+        if request.app.get(IS_LAN_PANEL) is True:
+            return web.Response(status=403, text="Simulated page actions forbidden on LAN interface.")
         disp_name = body.get("display") or dev.display
         orient = int(body.get("orientation", dev.orientation))
         has_multi = bool(body.get("has_multiple_pages", True))
@@ -1314,6 +1349,8 @@ async def api_touch(request):
 
 async def api_device_events(request):
     """Server-Sent Events (SSE) stream for zero-latency screen refresh pushes."""
+    if not check_token(request):
+        return web.Response(status=403, text="Forbidden")
     dev_id = request.match_info.get("device_id") or request.query.get("device", "default")
     dev = DEVICES.get_or_create(dev_id)
 
@@ -1388,6 +1425,8 @@ async def api_layouts_get(request):
 async def api_layouts_put(request):
     try:
         spec = await request.json()
+        if not isinstance(spec, dict) or not isinstance(spec.get("pages"), dict):
+            return web.json_response({"status": "error", "message": "Invalid layout spec: 'pages' must be a dictionary."}, status=400)
         save_layouts(spec)
         # Notify all devices
         for dev in DEVICES.devices.values():
@@ -1438,6 +1477,8 @@ async def api_devices_list(request):
 
 
 async def api_devices_get(request):
+    if request.app.get(IS_LAN_PANEL) is True and not check_token(request):
+        return web.Response(status=403, text="Forbidden")
     dev_id = request.match_info.get("device_id")
     dev = DEVICES.get_or_create(dev_id)
     return web.json_response(dev.to_dict())
@@ -1495,8 +1536,10 @@ async def api_push(request):
 
 async def api_entities(request):
     global _entity_cache
+    if not isinstance(_entity_cache, dict):
+        _entity_cache = {"at": 0.0, "items": []}
     now = time.time()
-    if _entity_cache["items"] and (now - _entity_cache["at"]) < 30.0:
+    if _entity_cache.get("items") and (now - _entity_cache.get("at", 0.0)) < 30.0:
         return web.json_response(_entity_cache["items"])
 
     if not HA_TOKEN:
@@ -1567,6 +1610,53 @@ async def api_mdi_font(request):
     return web.FileResponse(font_file, headers={"Cache-Control": "public, max-age=86400"})
 
 
+async def api_sources_get(request):
+    srcs = load_sources()
+    return web.json_response({"sources": feeds.mask_secrets(srcs)})
+
+
+async def api_sources_put(request):
+    try:
+        incoming = await request.json()
+        items = incoming.get("sources") if isinstance(incoming, dict) else incoming
+        existing = load_sources()
+        unmasked = feeds.unmask_secrets(items, existing)
+        feeds.save(DATA_DIR, unmasked)
+        return web.json_response({"status": "ok", "sources": feeds.mask_secrets(unmasked)})
+    except Exception as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+
+
+async def api_sources_test(request):
+    try:
+        src = await request.json()
+        existing = load_sources()
+        unmasked_list = feeds.unmask_secrets([src], existing)
+        target = unmasked_list[0] if unmasked_list else src
+        ctx = {"session": SHARED_SESSION, "ha_base": HA_BASE, "ha_token": HA_TOKEN}
+        res = await feeds.run_all([target], ctx)
+        published = [{"entity_id": eid, "state": st, "attributes": attrs} for (eid, st, attrs) in res]
+        return web.json_response({"status": "ok", "published": published})
+    except Exception as exc:
+        return web.json_response({"status": "error", "message": str(exc), "published": []})
+
+
+async def api_panel_setup(request):
+    return web.json_response({
+        "status": "ok",
+        "config": {
+            "ha_host": request.host.split(":")[0],
+            "wifi_ssid": "Home",
+            "api_key": "",
+            "ota_password": ""
+        }
+    })
+
+
+async def api_panel_refresh(request):
+    return web.json_response({"status": "ok", "ha_updated": False})
+
+
 async def periodic_ticker():
     """Background ticker updating devices according to their adaptive power profiles."""
     while True:
@@ -1591,15 +1681,16 @@ async def periodic_ticker():
 
 async def ha_websocket_listener():
     """Subscribe to Home Assistant WebSocket state_changed events for instant real-time pushes."""
-    token = os.environ.get("SUPERVISOR_TOKEN")
+    token = HA_TOKEN
     if not token:
         return
 
-    url = "http://supervisor/core/websocket"
+    ws_base = HA_BASE.replace("http://", "ws://").replace("https://", "wss://")
+    url = f"{ws_base}/websocket"
     backoff = 3
     while True:
         try:
-            async with SHARED_SESSION.ws_connect(url) as ws:
+            async with SHARED_SESSION.ws_connect(url, timeout=10) as ws:
                 msg = await ws.receive_json()
                 if msg.get("type") != "auth_required":
                     await asyncio.sleep(backoff)
@@ -1622,7 +1713,7 @@ async def ha_websocket_listener():
                         data = json.loads(ws_msg.data)
                         if data.get("type") == "event":
                             global _entity_cache
-                            _entity_cache = None
+                            _entity_cache = {"at": 0.0, "items": []}
 
                             now = time.time()
                             if now - last_push < 0.4:
@@ -1656,6 +1747,7 @@ async def ha_websocket_listener():
 async def start_app(app_runners):
     # LAN E-Reader Port (8099)
     panel = web.Application()
+    panel[IS_LAN_PANEL] = True
     panel.add_routes([
         web.get("/frame.png", frame_png),
         web.get("/frame.bmp", frame_bmp),
@@ -1663,9 +1755,7 @@ async def start_app(app_runners):
         web.get("/api/devices/{device_id}/frame.bmp", frame_bmp),
         web.get("/api/devices/{device_id}/events", api_device_events),
         web.post("/api/touch", api_touch),
-        web.get("/api/touch", api_touch),
         web.post("/api/devices/{device_id}/touch", api_touch),
-        web.get("/api/devices/{device_id}/touch", api_touch),
         web.get("/api/trmnl", api_trmnl),
         web.post("/api/trmnl", api_trmnl),
         web.get("/api/trmnl/display", api_trmnl),
@@ -1673,12 +1763,16 @@ async def start_app(app_runners):
         web.get("/api/devices/{device_id}/trmnl", api_trmnl),
         web.post("/api/devices/{device_id}/trmnl", api_trmnl),
         web.get("/api/devices/{device_id}", api_devices_get),
+        web.get("/api/panel-setup", api_panel_setup),
+        web.post("/api/panel-setup", api_panel_setup),
+        web.post("/api/panel-refresh", api_panel_refresh),
         web.get("/kiosk", kiosk_html),
         web.get("/kiosk/{device_id}", kiosk_html),
     ])
 
     # HA Ingress / Editor Port (8080)
     editor = web.Application(client_max_size=4 * 1024 * 1024)
+    editor[IS_LAN_PANEL] = False
     editor.add_routes([
         web.get("/", editor_index),
         web.get("/kiosk", kiosk_html),
@@ -1689,9 +1783,7 @@ async def start_app(app_runners):
         web.get("/api/devices/{device_id}/frame.bmp", frame_bmp),
         web.get("/api/devices/{device_id}/events", api_device_events),
         web.post("/api/touch", api_touch),
-        web.get("/api/touch", api_touch),
         web.post("/api/devices/{device_id}/touch", api_touch),
-        web.get("/api/devices/{device_id}/touch", api_touch),
         web.get("/api/trmnl", api_trmnl),
         web.post("/api/trmnl", api_trmnl),
         web.get("/api/trmnl/display", api_trmnl),
@@ -1707,6 +1799,12 @@ async def start_app(app_runners):
         web.get("/api/devices", api_devices_list),
         web.get("/api/devices/{device_id}", api_devices_get),
         web.post("/api/devices/{device_id}", api_devices_update),
+        web.get("/api/sources", api_sources_get),
+        web.put("/api/sources", api_sources_put),
+        web.post("/api/sources/test", api_sources_test),
+        web.get("/api/panel-setup", api_panel_setup),
+        web.post("/api/panel-setup", api_panel_setup),
+        web.post("/api/panel-refresh", api_panel_refresh),
         web.get("/api/entities", api_entities),
         web.get("/api/mdi/all", api_mdi_all),
         web.get("/api/mdi/font", api_mdi_font),

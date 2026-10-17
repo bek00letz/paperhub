@@ -1,6 +1,63 @@
 # Changelog
 
-## 1.5.0 - Airspace Radar, Flight Telemetry, Formula 1 Pit-Wall & Live Sports Scoreboards
+## 1.5.2 - Security Hardening, Robust Widget Rasterization, Data Sources API & Daemon Resilience
+
+- **Security & Access Control (SEC-01 & SEC-02)**:
+  - **Eliminated CSRF State Mutation Vector**: Removed all `GET` routes for `/api/touch` and `/api/devices/{device_id}/touch`. State mutations (toggling lights, calling services, navigating pages) are strictly enforced as `POST` requests, preventing cross-site image trigger vulnerabilities.
+  - **Restricted In-Memory Page Simulation**: Restricted `client_page` simulation payloads strictly to Home Assistant Ingress (`is_lan_panel == False`). LAN requests attempting to simulate in-memory page structures are rejected with HTTP 403 Forbidden.
+  - **Header-Based Token Authentication**: Enhanced `check_token` to accept standard `Authorization: Bearer <token>` and `X-PaperHub-Token` / `Access-Token` headers in addition to query parameters. Enforced token authentication on LAN SSE event streams (`/api/devices/{device_id}/events`) and device information queries (`/api/devices/{device_id}`).
+  - **Device Registration Hard Cap**: Capped total registered device sessions (`MAX_DEVICES = 32`) to prevent memory exhaustion and flash storage wear from unauthorized or random device ID probing.
+
+- **Core Rendering Engine & Widget Fixes (BUG-01, BUG-02, BUG-03, BUG-09, BUG-10)**:
+  - **Normalized `draw_card` Box Unpacking**: Extended card container geometry to accept both 4-tuples `(x0, y0, x1, y1)` and 2-point lists `[(x0, y0), (x1, y1)]`. Fixed rendering crashes across 7 major widgets (`dynamic_grid`, `calendar_timeline`, `weather_forecast`, `flight_tracker`, `flight_radar`, `sports_racing`, `sports_match`, and `button`).
+  - **Degenerate Geometry Protection**: Protected `draw_card` and `draw_concentric_badge` from zero-area and collapsed bounding boxes when elements fall outside display bounds, preventing Pillow `ValueError` exceptions on smaller displays like TRMNL.
+  - **Live State Passing to Tiles & Icons**: Routed resolved template dictionaries `vals.get(i)` directly to all tile drawers (`tile`, `light_tile`, `switch_tile`, `sensor_tile`, `climate_tile`, `media_tile`, `action_tile`) and `icon` elements, ensuring live states, brightness percentages, and dynamic icons render accurately instead of falling back to empty strings.
+  - **Jinja Delimiter Restoration**: Enclosed extended data widgets (`flight_tracker`, `flight_radar`, `sports_racing`, `sports_match`) in standard `{{ ... }}` delimiters so Home Assistant evaluates them as live template expressions rather than static strings.
+  - **Preserved Custom Grid Item Configuration**: Merged live state updates with configured item definitions in `dynamic_grid`, preserving user-configured icons, actions, and services across live updates.
+  - **Defensive Template Binding**: Hardened `last_changed` and `last_updated` expressions in `binding.py` with safe `states[...] is defined` guards, and validated dictionary types before processing replacement rules.
+
+- **Server Stability, Caches & Data Feeds (BUG-04, BUG-05, BUG-07, BUG-08)**:
+  - **Defensive Entity Cache Lifecycle**: Reset `_entity_cache` to `{"at": 0.0, "items": []}` rather than `None` on WebSocket state changes, eliminating `TypeError: 'NoneType' object is not subscriptable` regressions.
+  - **Live Data Sources API**: Registered `GET /api/sources`, `PUT /api/sources`, and `POST /api/sources/test` endpoints backed by the `feeds` engine, featuring automatic secret masking (`••••••••`) for secure credential management in the web editor.
+  - **Panel Setup Compatibility Routes**: Added compatibility handlers for `GET`/`POST /api/panel-setup` and `POST /api/panel-refresh` to prevent 404 alert dialogs in the web UI.
+  - **Dynamic WebSocket Connection URL**: Derived the Home Assistant WebSocket URL dynamically from `HA_BASE` and unified authentication token resolution across `HA_TOKEN` and `SUPERVISOR_TOKEN`.
+  - **Live Quiet Hours Entity Evaluation**: Evaluated live state from `_entity_cache` when computing next wake intervals for devices configured with quiet hours entity triggers.
+  - **Weather Cache Temperature Preservation**: Preserved live current temperature and weather conditions from the latest state fallback when returning cached multi-day forecasts.
+  - **Layout Specification Validation**: Enforced strict validation of layout specifications in `PUT /api/layouts`, rejecting invalid payloads where `pages` is missing or not a dictionary.
+
+- **Client Daemon & Evdev Hardening (BUG-06)**:
+  - **Eliminated Shell Word Splitting on ETag**: Directly quoted header arguments in `curl` within `paperhub-daemon.sh`, preventing malformed conditional HTTP requests when handling ETags.
+  - **Atomic Frame Writes on Touch**: Replaced direct stdout file redirection with atomic temporary files (`${FRAME_TMP}.touch`) on touch events across both `evtest` and raw binary fallback loops, preventing blank screen corruptions if a network blip occurs during a touch fetch.
+  - **64-bit Kernel Input Event Support**: Added auto-detection for 32-bit (`IIHHi`, 16-byte) vs 64-bit (`qqHHi`, 24-byte) `struct input_event` packing in `paperhub-evdev.py`, ensuring full compatibility with modern 64-bit Linux kernels (such as on Raspberry Pi and modern e-readers).
+
+- **Automated Verification Suite**:
+  - Added 9 new unit tests covering dual bounding box unpacking, widget pixel rasterization, tile value passing, entity cache resilience, template delimiters, header token authentication, LAN simulation blocking, and device registration limits.
+  - Expanded test coverage to 39 automated tests, with 100% passing.
+
+## 1.5.1 - Prominent 50% Chevrons, Dynamic Canvas Edge Expansion, Zero-Modal Ingress Presets & Resilient Entities
+
+- **Prominent Edge Navigation Chevrons**:
+  - Replaced tiny 44px text glyphs with imposing, Apple-grade geometric chevrons spanning **half the screen tall (50% canvas height)** and **edge-width wide (55%–65% gutter width)**.
+  - In Python layout rasterization (`layout.py`), rendered with smooth curved polyline strokes (`T.GRAY_MID`, 8–10px thick) centered within the left and right navigation gutters.
+  - In the visual editor (`index.html`), rendered with high-precision vector SVGs (`.edge-chevron-svg`) with dark mode support and tactile hover scaling.
+- **Physical Canvas Increase & Decrease on Edge Zones Toggle**:
+  - Clicking `📖 Edge Zones` now immediately reflows elements on the page between constrained center mode (`[edge_w, cw - edge_w]`) and full-width mode (`[margin, cw - margin]`).
+  - When disabled, tiles, cards, and wide widgets expand horizontally across the entire liberated display width.
+  - When enabled, elements cleanly contract to fit within safe gutters.
+  - Toggling edge navigation automatically persists to `layouts.json` and notifies devices.
+- **Robust Preset Page Creation in Sandboxed Ingress**:
+  - Eliminated `window.prompt()` which was blocked inside Home Assistant Ingress iframes.
+  - Clicking any preset in the Preset Library automatically generates a clean, unique page slug (e.g. `airspace_radar`, `formula_1`), initializes rotation arrays safely, reflows elements to canvas dimensions, selects the page, and commits via `saveLayouts()`.
+  - Introduced an Apple-standard in-DOM dialog modal (`#promptmodal`) with keyboard navigation (Enter/Escape) for custom page creation, duplication, and renaming, completely immune to iframe sandboxing.
+- **Resilient Friendly Entities & Token Handling**:
+  - Recognized Home Assistant `SUPERVISOR_TOKEN` automatically in addition to `HA_TOKEN`.
+  - Added graceful fallback in `api_entities`: if Home Assistant Core or Supervisor times out or experiences a transient error, the endpoint gracefully serves cached entities or offline fixtures with complete friendly names instead of throwing an HTTP 500 error.
+  - Added a dedicated `↻ Reload` button in the Entities Explorer header with automatic background retry if entities are initially empty.
+  - Added an `Auto` friendly name sync button in Tile properties to instantly sync card titles with the bound Home Assistant entity.
+- **Landscape Touch Hit-Testing Accuracy**:
+  - Fixed an orientation clamping bug in `_clamp_box` where landscape screens were previously clamped using portrait dimensions, eliminating touch misregistration and preventing false page turns when tapping elements on the right half of rotated screens.
+- **Automated Test Suite**:
+  - Added 3 new unit tests covering landscape hit-testing accuracy, prominent chevron rendering, and resilient entity fallback (30 total tests, 100% passing).
 
 - **Overhead Airspace Radar & Flight Telemetry (`flight_tracker` / `flight_radar`)**:
   - **Tactical 360° Circular PPI Radar Scope**: Concentric range rings, cardinal heading labels (N, E, S, W), range scale indicators, and directional aircraft chevrons rotated to real-time `track_deg` heading, with a targeted corner reticle around the closest or selected aircraft.

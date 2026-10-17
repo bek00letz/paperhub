@@ -53,7 +53,8 @@ def template_for(el):
     if show == "attribute":
         core = f"state_attr('{_quote(ent)}', '{_quote(el.get('attribute', ''))}')"
     elif show in ("last_changed", "last_updated"):
-        src = f"states['{_quote(ent)}'].{show}"
+        qent = _quote(ent)
+        src = f"(states['{qent}'].{show} if (states['{qent}'] is defined and states['{qent}'] is not none) else now())"
         fmt = el.get("format") or "relative"
         if fmt == "relative":
             core = f"relative_time({src})"
@@ -82,7 +83,9 @@ def template_for(el):
 
     # Replacements cover the common "say it in my words" case without a
     # chain of | replace() the user has to write by hand.
-    for find, repl in (el.get("replace") or {}).items():
-        core = f"({core}) | replace('{_quote(find)}', '{_quote(repl)}')"
+    repl_map = el.get("replace")
+    if isinstance(repl_map, dict):
+        for find, repl in repl_map.items():
+            core = f"({core}) | replace('{_quote(find)}', '{_quote(repl)}')"
 
     return "{{ " + core + " }}"
