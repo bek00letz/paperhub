@@ -3,6 +3,29 @@
 > **Ambient E-Ink Touch Controller for Home Assistant**  
 > *Transform consumer e-readers into zero-latency, multi-week battery smart home touch remotes.*
 
+> [!NOTE]
+> ⚡ **Disclaimer — Vibe-Coded Project Notice**:  
+> PaperHub is **vibe-coded** from the ground up. It was conceived, architected, refined, and built through prompt-driven agentic pairing to solve a real itch: consumer E-Ink readers (Onyx Boox, Kindle, Kobo, reMarkable) have magnificent screens and weeks of battery life, but running Home Assistant Lovelace on them is an unbearable, battery-draining slog. Expect rapid iteration, opinionated Apple craftsmanship, and clean Python/JS code crafted with obsessive attention to detail.
+
+---
+
+## 💡 How It Works (The Plain-English Explanation)
+
+If you've ever tried opening Home Assistant in an e-reader browser, you know the frustration: the device chokes trying to render bloated JavaScript and web animations, lagging 2 seconds per tap and dying by dinner time.
+
+**PaperHub completely reverses this paradigm:**
+
+1. **The Server Draws the Pictures**: Your Home Assistant machine (Raspberry Pi, Mini PC, or home server) has ample CPU power. PaperHub's server-side engine renders your dashboard into a razor-sharp, 16-level grayscale bitmap in just **~15 milliseconds**.
+2. **Your E-Reader Acts as a Zero-Overhead Picture Frame**: Your e-reader runs no heavy dashboard code, no DOM, and no background JavaScript loops. It simply displays that one image.
+3. **Touches Report Coordinates `(X, Y)`**: When you tap a button or card, your device sends a featherweight request: *"The user tapped at X=420, Y=350"*.
+4. **Sub-50ms Reaction**: Home Assistant checks its internal layout map, triggers the action (`light.toggle`, `climate.set_temperature`, `script.run`), re-renders the frame, and returns the updated picture in milliseconds.
+5. **E-Book Page Flipping ("Book Metaphor")**:
+   - Tap the **left 15%** of the screen $\to$ previous page.
+   - Tap the **right 15%** of the screen $\to$ next page.
+   - Or swipe left / right with your finger.
+
+Because the e-reader's processor does virtually no computational work, it stays cool, never stutters, and the battery lasts **weeks instead of hours**.
+
 ---
 
 ## 1. Executive Summary & Problem Space
