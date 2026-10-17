@@ -296,11 +296,22 @@ class DeviceSession:
         self.edge_nav_ratio = float(data.get("edge_nav_ratio", 0.15))
         self.battery_pct = data.get("battery_pct")
         self.last_seen = time.time()
+        self.last_render_time = float(data.get("last_render_time", 0.0))
         self.version = 1
         self.frame_png = b""
         self.frame_bmp = b""
         self.etag = ""
         self.subscribers: set[asyncio.Queue] = set()
+
+        # Power & Sync Profile
+        self.screen_mode = data.get("screen_mode") or "interactive"
+        self.refresh_interval = int(data.get("refresh_interval") if data.get("refresh_interval") is not None else 15)
+        self.push_on_entity_change = bool(data.get("push_on_entity_change", True))
+        self.quiet_hours_enabled = bool(data.get("quiet_hours_enabled", True))
+        self.quiet_hours_start = str(data.get("quiet_hours_start") or "23:00")
+        self.quiet_hours_end = str(data.get("quiet_hours_end") or "07:00")
+        self.quiet_hours_interval = int(data.get("quiet_hours_interval") if data.get("quiet_hours_interval") is not None else 0)
+        self.quiet_hours_entity = str(data.get("quiet_hours_entity") or "").strip()
 
     def to_dict(self):
         return {
@@ -314,6 +325,14 @@ class DeviceSession:
             "battery_pct": self.battery_pct,
             "last_seen": self.last_seen,
             "version": self.version,
+            "screen_mode": self.screen_mode,
+            "refresh_interval": self.refresh_interval,
+            "push_on_entity_change": self.push_on_entity_change,
+            "quiet_hours_enabled": self.quiet_hours_enabled,
+            "quiet_hours_start": self.quiet_hours_start,
+            "quiet_hours_end": self.quiet_hours_end,
+            "quiet_hours_interval": self.quiet_hours_interval,
+            "quiet_hours_entity": self.quiet_hours_entity,
         }
 
     def notify(self):
@@ -323,6 +342,74 @@ class DeviceSession:
                 q.put_nowait({"event": "render", "version": self.version, "page": self.active_page})
             except Exception:
                 pass
+
+
+def compute_device_next_wake_seconds(dev: DeviceSession, ha_states: dict | None = None) -> int:
+    """Compute adaptive seconds until next client wake-up considering quiet hours and triggers."""
+    now = datetime.now()
+    is_quiet = False
+
+    if dev.quiet_hours_enabled:
+        # 1. Custom HA entity trigger check (e.g. input_boolean.sleep_mode)
+        if dev.quiet_hours_entity:
+            states = ha_states if ha_states is not None else load_fixture().get("states", {})
+            st_obj = states.get(dev.quiet_hours_entity) or {}
+            st_val = str(st_obj.get("state") or "").strip().lower()
+            if st_val in ("on", "true", "sleep", "sleeping", "active", "night", "not_home"):
+                is_quiet = True
+
+        # 2. Configurable time range check
+        if not is_quiet and dev.quiet_hours_start and dev.quiet_hours_end:
+            try:
+                sh, sm = map(int, dev.quiet_hours_start.split(":"))
+                eh, em = map(int, dev.quiet_hours_end.split(":"))
+                start_dt = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
+                end_dt = now.replace(hour=eh, minute=em, second=0, microsecond=0)
+                if start_dt <= end_dt:
+                    is_quiet = start_dt <= now < end_dt
+                else:
+                    # Overnight range (e.g. 23:00 to 07:00)
+                    is_quiet = now >= start_dt or now < end_dt
+            except Exception:
+                pass
+
+    if is_quiet:
+        if dev.quiet_hours_interval > 0:
+            return dev.quiet_hours_interval * 60
+        # Calculate seconds until end_dt
+        try:
+            eh, em = map(int, dev.quiet_hours_end.split(":"))
+            end_dt = now.replace(hour=eh, minute=em, second=0, microsecond=0)
+            if end_dt <= now:
+                end_dt += timedelta(days=1)
+            secs_until_morning = int((end_dt - now).total_seconds())
+            return max(60, min(86400, secs_until_morning))
+        except Exception:
+            return 28800  # 8 hours default
+
+    # Normal daytime operation
+    if dev.refresh_interval <= 0:
+        return 86400  # Touch only (sleep up to 24h)
+    return max(10, dev.refresh_interval * 60)
+
+
+def page_has_entity(page: dict, entity_id: str) -> bool:
+    """Check if a layout page references a specific Home Assistant entity."""
+    if not page or not entity_id:
+        return False
+    eid = entity_id.strip()
+    for el in page.get("elements", []):
+        if (el.get("entity") or "").strip() == eid:
+            return True
+        if el.get("type") == "dynamic_grid":
+            for it in el.get("items", []):
+                if (it.get("entity") or "").strip() == eid:
+                    return True
+        val = str(el.get("value") or "")
+        sub = str(el.get("subtitle") or "")
+        if eid in val or eid in sub:
+            return True
+    return False
 
 
 class DeviceManager:
@@ -414,6 +501,7 @@ async def render_device_frame(session, dev: DeviceSession, spec: dict) -> bytes:
     dev.frame_png = png_bytes
     dev.frame_bmp = bmp_bytes
     dev.etag = hashlib.sha256(png_bytes).hexdigest()[:16]
+    dev.last_render_time = time.time()
     return png_bytes
 
 
@@ -470,6 +558,9 @@ async def handle_touch(session, dev: DeviceSession, spec: dict, x: float, y: flo
                     tgt = hit.get("target_page") or act
                     if tgt in pages:
                         dev.active_page = tgt
+                elif dev.screen_mode == "view_only":
+                    # View-only ambient frame suppresses entity toggles and mutations
+                    pass
                 elif act == "toggle" and ent:
                     await call_ha_service(session, "homeassistant", "toggle", {"entity_id": ent})
                 elif act in ("turn_on", "turn_off") and ent:
@@ -518,19 +609,26 @@ async def frame_png(request):
         spec = load_layouts()
         await render_device_frame(SHARED_SESSION, dev, spec)
 
+    next_wake_secs = compute_device_next_wake_seconds(dev)
+    headers = {
+        "ETag": f'"{dev.etag}"',
+        "Cache-Control": "no-cache, must-revalidate",
+        "X-PaperHub-Version": str(dev.version),
+        "X-PaperHub-Page": dev.active_page,
+        "X-PaperHub-Next-Wake": str(next_wake_secs),
+        "X-PaperHub-Refresh-Interval": str(dev.refresh_interval),
+        "X-PaperHub-Screen-Mode": dev.screen_mode,
+        "Refresh": str(next_wake_secs),
+    }
+
     if_none = (request.headers.get("If-None-Match") or "").strip('" ')
     if if_none and if_none == dev.etag:
-        return web.Response(status=304, headers={"ETag": f'"{dev.etag}"', "Cache-Control": "no-cache"})
+        return web.Response(status=304, headers=headers)
 
     return web.Response(
         body=dev.frame_png,
         content_type="image/png",
-        headers={
-            "ETag": f'"{dev.etag}"',
-            "Cache-Control": "no-cache, must-revalidate",
-            "X-PaperHub-Version": str(dev.version),
-            "X-PaperHub-Page": dev.active_page,
-        },
+        headers=headers,
     )
 
 
@@ -546,19 +644,26 @@ async def frame_bmp(request):
         spec = load_layouts()
         await render_device_frame(SHARED_SESSION, dev, spec)
 
+    next_wake_secs = compute_device_next_wake_seconds(dev)
+    headers = {
+        "ETag": f'"{dev.etag}"',
+        "Cache-Control": "no-cache, must-revalidate",
+        "X-PaperHub-Version": str(dev.version),
+        "X-PaperHub-Page": dev.active_page,
+        "X-PaperHub-Next-Wake": str(next_wake_secs),
+        "X-PaperHub-Refresh-Interval": str(dev.refresh_interval),
+        "X-PaperHub-Screen-Mode": dev.screen_mode,
+        "Refresh": str(next_wake_secs),
+    }
+
     if_none = (request.headers.get("If-None-Match") or "").strip('" ')
     if if_none and if_none == dev.etag:
-        return web.Response(status=304, headers={"ETag": f'"{dev.etag}"', "Cache-Control": "no-cache"})
+        return web.Response(status=304, headers=headers)
 
     return web.Response(
         body=dev.frame_bmp,
         content_type="image/bmp",
-        headers={
-            "ETag": f'"{dev.etag}"',
-            "Cache-Control": "no-cache, must-revalidate",
-            "X-PaperHub-Version": str(dev.version),
-            "X-PaperHub-Page": dev.active_page,
-        },
+        headers=headers,
     )
 
 
@@ -610,7 +715,7 @@ async def api_trmnl(request):
     proto = request.headers.get("X-Forwarded-Proto") or "http"
     base_url = f"{proto}://{host}"
 
-    refresh_rate = int(os.environ.get("REFRESH_SECONDS", "300") or 300)
+    refresh_rate = compute_device_next_wake_seconds(dev)
     payload = {
         "status": 0,
         "image_url": f"{base_url}/api/devices/{dev.device_id}/frame.bmp?v={dev.version}",
@@ -672,7 +777,9 @@ async def api_touch(request):
                 ent = hit.get("entity")
                 srv = hit.get("service")
                 data = hit.get("data") or {}
-                if act == "toggle" and ent:
+                if dev.screen_mode == "view_only" and act != "navigate_page" and not hit.get("target_page"):
+                    pass
+                elif act == "toggle" and ent:
                     await call_ha_service(SHARED_SESSION, "homeassistant", "toggle", {"entity_id": ent})
                 elif act in ("turn_on", "turn_off") and ent:
                     await call_ha_service(SHARED_SESSION, "homeassistant", act, {"entity_id": ent})
@@ -828,6 +935,12 @@ async def api_devices_list(request):
     return web.json_response([dev.to_dict() for dev in DEVICES.devices.values()])
 
 
+async def api_devices_get(request):
+    dev_id = request.match_info.get("device_id")
+    dev = DEVICES.get_or_create(dev_id)
+    return web.json_response(dev.to_dict())
+
+
 async def api_devices_update(request):
     dev_id = request.match_info.get("device_id")
     dev = DEVICES.get_or_create(dev_id)
@@ -845,6 +958,22 @@ async def api_devices_update(request):
             dev.edge_nav = bool(body["edge_nav"])
         if "edge_nav_ratio" in body:
             dev.edge_nav_ratio = float(body["edge_nav_ratio"])
+        if "screen_mode" in body:
+            dev.screen_mode = str(body["screen_mode"])
+        if "refresh_interval" in body:
+            dev.refresh_interval = int(body["refresh_interval"])
+        if "push_on_entity_change" in body:
+            dev.push_on_entity_change = bool(body["push_on_entity_change"])
+        if "quiet_hours_enabled" in body:
+            dev.quiet_hours_enabled = bool(body["quiet_hours_enabled"])
+        if "quiet_hours_start" in body:
+            dev.quiet_hours_start = str(body["quiet_hours_start"])
+        if "quiet_hours_end" in body:
+            dev.quiet_hours_end = str(body["quiet_hours_end"])
+        if "quiet_hours_interval" in body:
+            dev.quiet_hours_interval = int(body["quiet_hours_interval"])
+        if "quiet_hours_entity" in body:
+            dev.quiet_hours_entity = str(body["quiet_hours_entity"]).strip()
         DEVICES.save()
         spec = load_layouts()
         await render_device_frame(SHARED_SESSION, dev, spec)
@@ -921,16 +1050,21 @@ async def api_mdi_font(request):
 
 
 async def periodic_ticker():
-    """Background ticker updating devices every REFRESH seconds."""
+    """Background ticker updating devices according to their adaptive power profiles."""
     while True:
         try:
-            await asyncio.sleep(REFRESH)
+            await asyncio.sleep(30)
+            now = time.time()
             spec = load_layouts()
             for dev in list(DEVICES.devices.values()):
                 # Only re-render if seen in last 24h
-                if time.time() - dev.last_seen < 86400:
-                    await render_device_frame(SHARED_SESSION, dev, spec)
-                    dev.notify()
+                if now - dev.last_seen < 86400:
+                    if dev.refresh_interval <= 0:
+                        continue
+                    next_wake = compute_device_next_wake_seconds(dev)
+                    if (now - dev.last_render_time) >= next_wake:
+                        await render_device_frame(SHARED_SESSION, dev, spec)
+                        dev.notify()
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -977,11 +1111,19 @@ async def ha_websocket_listener():
                                 continue
 
                             last_push = now
+                            event_data = data.get("event", {}).get("data", {})
+                            changed_eid = event_data.get("entity_id", "")
+
                             spec = load_layouts()
+                            pages = spec.get("pages", {})
                             for dev in list(DEVICES.devices.values()):
                                 if time.time() - dev.last_seen < 86400:
-                                    await render_device_frame(SHARED_SESSION, dev, spec)
-                                    dev.notify()
+                                    if not dev.push_on_entity_change:
+                                        continue
+                                    active_page = pages.get(dev.active_page, {})
+                                    if not changed_eid or page_has_entity(active_page, changed_eid) or changed_eid == dev.quiet_hours_entity:
+                                        await render_device_frame(SHARED_SESSION, dev, spec)
+                                        dev.notify()
 
                     elif ws_msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                         break
@@ -1012,6 +1154,7 @@ async def start_app(app_runners):
         web.post("/api/trmnl/display", api_trmnl),
         web.get("/api/devices/{device_id}/trmnl", api_trmnl),
         web.post("/api/devices/{device_id}/trmnl", api_trmnl),
+        web.get("/api/devices/{device_id}", api_devices_get),
         web.get("/kiosk", kiosk_html),
         web.get("/kiosk/{device_id}", kiosk_html),
     ])
@@ -1044,6 +1187,7 @@ async def start_app(app_runners):
         web.post("/api/preview", api_preview),
         web.post("/api/push", api_push),
         web.get("/api/devices", api_devices_list),
+        web.get("/api/devices/{device_id}", api_devices_get),
         web.post("/api/devices/{device_id}", api_devices_update),
         web.get("/api/entities", api_entities),
         web.get("/api/mdi/all", api_mdi_all),

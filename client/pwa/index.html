@@ -249,9 +249,57 @@
         sendTouch(coords.x, coords.y, 'tap');
       }, { passive: true });
 
+      let deviceConfig = {
+        screen_mode: "interactive",
+        refresh_interval: 15,
+        push_on_entity_change: true
+      };
+      let refreshTimer = null;
+      let sseConnection = null;
+
+      async function syncDeviceConfig() {
+        try {
+          const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`);
+          if (resp.ok) {
+            deviceConfig = await resp.json();
+            applyPowerProfile();
+          }
+        } catch (e) {
+          console.warn("Could not fetch device power profile:", e);
+        }
+      }
+
+      function applyPowerProfile() {
+        // 1. Manage periodic timer
+        if (refreshTimer) {
+          clearInterval(refreshTimer);
+          refreshTimer = null;
+        }
+        if (deviceConfig.refresh_interval && deviceConfig.refresh_interval > 0) {
+          const intervalMs = Math.max(10000, deviceConfig.refresh_interval * 60 * 1000);
+          refreshTimer = setInterval(() => {
+            refreshFrame();
+          }, intervalMs);
+        }
+
+        // 2. Manage SSE push connection
+        if (deviceConfig.push_on_entity_change !== false) {
+          if (!sseConnection) connectSSE();
+        } else {
+          if (sseConnection) {
+            sseConnection.close();
+            sseConnection = null;
+          }
+        }
+      }
+
       // SSE connection for immediate real-time pushes
       function connectSSE() {
+        if (sseConnection) {
+          sseConnection.close();
+        }
         const es = new EventSource(eventsUrl);
+        sseConnection = es;
         es.onopen = () => {
           showStatus("Connected");
         };
@@ -265,7 +313,10 @@
         };
         es.onerror = () => {
           es.close();
-          setTimeout(connectSSE, 4000);
+          sseConnection = null;
+          if (deviceConfig.push_on_entity_change !== false) {
+            setTimeout(connectSSE, 5000);
+          }
         };
       }
 
@@ -281,19 +332,15 @@
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
           refreshFrame();
+          syncDeviceConfig();
           requestWakeLock();
         }
       });
 
       // Initial startup
       refreshFrame();
-      connectSSE();
+      syncDeviceConfig();
       requestWakeLock();
-
-      // 30-second background poll fallback (keeps clock and sensors fresh even if SSE drops)
-      setInterval(() => {
-        refreshFrame();
-      }, 30000);
     })();
   </script>
 </body>

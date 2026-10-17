@@ -828,6 +828,41 @@ aside {
   box-shadow: var(--shadow-lg);
   overscroll-behavior: contain;
 }
+.ps-mode-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  cursor: pointer;
+  background: var(--bg-card);
+  transition: all 0.15s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.ps-mode-card:hover {
+  border-color: var(--border-focus);
+  background: var(--bg-card-hover);
+}
+.ps-mode-card.active {
+  border: 2px solid var(--accent) !important;
+  background: var(--accent-subtle) !important;
+}
+.chip-preset {
+  padding: 3px 9px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.chip-preset:hover {
+  border-color: var(--border-focus);
+}
+.chip-preset.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
 .codebox {
   font: 12px/1.45 ui-monospace, monospace;
   background: #0d1117;
@@ -1110,6 +1145,7 @@ aside {
       <button id="toolsbtn" class="sm icon-btn" title="Settings &amp; Tools">⚙️</button>
       <div class="menu-popover right" id="toolsmenu">
         <button id="setupbtn"><span style="font-size:14px">📟</span> Panel Setup &amp; Firmware</button>
+        <button id="menupowersync"><span style="font-size:14px">⚡</span> Power &amp; Sync Profile</button>
         <button id="datasrc"><span style="font-size:14px">🔌</span> Data Sources</button>
         <div class="menu-sep"></div>
         <button id="themetoggle"><span style="font-size:14px">🌓</span> Toggle Dark / Light</button>
@@ -1163,11 +1199,10 @@ aside {
             <option value="0">Disabled (Off)</option>
           </select>
         </label>
-        <label class="badge-tag" id="panel-refresh-badge" title="Physical panel hardware refresh interval. Adjust dynamically without reflashing firmware!" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
-          <span>Refresh:</span>
-          <input type="range" id="panel-refresh-slider" min="1" max="60" value="5" style="width:68px;accent-color:var(--accent);cursor:pointer;vertical-align:middle;margin:0" />
-          <span id="panel-refresh-val" style="font-weight:700;min-width:34px;display:inline-block">5 min</span>
-        </label>
+        <button id="powersyncbtn" class="badge-tag" title="Configure device operating mode, background refresh interval, instant push, and night hibernation" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:2px 10px;font-weight:600;font-size:11px">
+          <span>⚡</span>
+          <span id="powersynclabel">Interactive (15m)</span>
+        </button>
       </div>
       <div style="display:flex;gap:6px;align-items:center">
         <button id="sim-btn" class="sm" title="Test touch taps and book navigation interactively" style="display:inline-flex;align-items:center;gap:4px">
@@ -1504,6 +1539,143 @@ aside {
     </div>
     <div style="overflow:auto;background:#0d1117;padding:16px;border-radius:10px;text-align:center">
       <img id="stripimg" alt="Rendered strip" style="max-width:100%;height:auto;background:#fff;border-radius:2px;display:block;margin:0 auto">
+    </div>
+  </div>
+</div>
+
+<!-- Power & Sync Profile Modal -->
+<div id="powersyncwrap" class="modal-wrap">
+  <div class="modal-card" style="width:min(680px,95vw);max-height:90vh;display:flex;flex-direction:column;gap:16px">
+    <div class="row" style="margin:0;align-items:center">
+      <div style="display:flex;align-items:center;gap:8px;flex:1">
+        <span style="font-size:20px">⚡</span>
+        <div>
+          <strong style="font-size:16px;display:block">Power &amp; Sync Profile</strong>
+          <span style="font-size:12px;color:var(--text-secondary)">Tune battery efficiency and update frequency for e-readers</span>
+        </div>
+      </div>
+      <button id="powersyncclose">Close</button>
+    </div>
+
+    <div style="overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding-right:2px;max-height:68vh">
+      <!-- Target Device -->
+      <div class="card"><div class="body" style="padding:12px 14px">
+        <div class="row" style="margin:0;align-items:center">
+          <label style="width:120px;font-weight:600;font-size:12.5px">Device</label>
+          <select id="ps_device" style="flex:1">
+            <option value="default">Default E-Reader</option>
+          </select>
+        </div>
+      </div></div>
+
+      <!-- Strategy 2: Two Clear Operating Models -->
+      <div class="card"><div class="body" style="padding:14px;display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px">Operating Model</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px" id="ps_modes">
+          <div class="ps-mode-card active" data-mode="interactive" id="ps_mode_interactive">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <span style="font-size:18px">👆</span>
+              <strong style="font-size:13.5px">Interactive Touch</strong>
+            </div>
+            <p style="font-size:11.5px;color:var(--text-secondary);line-height:1.45;margin:0">
+              Responsive dashboard. Taps toggle lights, trigger scenes, and navigate pages. Wakes instantly on touch.
+            </p>
+          </div>
+          <div class="ps-mode-card" data-mode="view_only" id="ps_mode_view_only">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <span style="font-size:18px">🖼️</span>
+              <strong style="font-size:13.5px">View-Only Ambient Frame</strong>
+            </div>
+            <p style="font-size:11.5px;color:var(--text-secondary);line-height:1.45;margin:0">
+              Pure presentation canvas (wall art, calendar). Taps navigate pages or wake screen, zero accidental entity toggles.
+            </p>
+          </div>
+        </div>
+      </div></div>
+
+      <!-- Strategy 1: Background Refresh Rate -->
+      <div class="card"><div class="body" style="padding:14px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px">Background Sync Interval</div>
+          <span style="font-size:11px;color:var(--text-muted)">0 to 10,080 min</span>
+        </div>
+        <div class="row" style="margin:0;align-items:center;gap:8px">
+          <label style="width:120px;font-weight:600;font-size:12.5px">Idle Refresh</label>
+          <input type="number" id="ps_interval" min="0" max="10080" step="1" value="15" style="width:90px;font-weight:700;text-align:center">
+          <span style="font-size:12.5px;font-weight:600">minutes</span>
+        </div>
+        <!-- Quick Preset Chips -->
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding-top:4px" id="ps_interval_presets">
+          <button class="sm chip-preset" data-val="0" title="Zero periodic wakeups">0m (Touch Only)</button>
+          <button class="sm chip-preset" data-val="1">1m</button>
+          <button class="sm chip-preset" data-val="5">5m</button>
+          <button class="sm chip-preset active" data-val="15">15m</button>
+          <button class="sm chip-preset" data-val="30">30m</button>
+          <button class="sm chip-preset" data-val="60">1h</button>
+          <button class="sm chip-preset" data-val="240">4h</button>
+          <button class="sm chip-preset" data-val="720">12h</button>
+          <button class="sm chip-preset" data-val="1440">24h</button>
+        </div>
+        <div id="ps_interval_hint" class="chip" style="margin:2px 0 0;font-size:11.5px;color:var(--text-secondary)">
+          ⏱️ <b>Periodic Wake:</b> Tablet wakes every 15 minutes to update clocks, weather, and sensors.
+        </div>
+      </div></div>
+
+      <!-- Strategy 1.b: Instant Push on Screen Entity Change -->
+      <div class="card"><div class="body" style="padding:14px;display:flex;flex-direction:column;gap:8px">
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+          <input type="checkbox" id="ps_push_entity" checked style="width:18px;height:18px;margin-top:2px;flex:none">
+          <div>
+            <strong style="font-size:13px;display:block">Push instantly when on-screen entities change</strong>
+            <span style="font-size:11.5px;color:var(--text-secondary);line-height:1.4">
+              When a light, sensor, or switch visible on the active screen updates in Home Assistant, PaperHub pushes a screen redraw immediately over WebSocket/SSE. Off-screen changes never wake the device.
+            </span>
+          </div>
+        </label>
+      </div></div>
+
+      <!-- Strategy 3: Quiet Hours / Night Hibernation -->
+      <div class="card"><div class="body" style="padding:14px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px">Night Hibernation &amp; Quiet Hours</div>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:600">
+            <input type="checkbox" id="ps_quiet_enabled" checked style="width:16px;height:16px"> Enable
+          </label>
+        </div>
+        <div id="ps_quiet_details" style="display:flex;flex-direction:column;gap:10px">
+          <div class="row" style="margin:0;align-items:center;gap:8px;flex-wrap:wrap">
+            <label style="width:120px;font-weight:600;font-size:12.5px">Time Range</label>
+            <span style="font-size:12px;color:var(--text-secondary)">From</span>
+            <input type="time" id="ps_quiet_start" value="23:00" style="width:105px;font-weight:600">
+            <span style="font-size:12px;color:var(--text-secondary)">to</span>
+            <input type="time" id="ps_quiet_end" value="07:00" style="width:105px;font-weight:600">
+          </div>
+          <div class="row" style="margin:0;align-items:center;gap:8px;flex-wrap:wrap">
+            <label style="width:120px;font-weight:600;font-size:12.5px">Night Wakeup</label>
+            <input type="number" id="ps_quiet_interval" min="0" max="1440" value="0" style="width:80px;font-weight:700;text-align:center">
+            <span style="font-size:12.5px;font-weight:600">minutes</span>
+            <span style="font-size:11.5px;color:var(--text-muted)">(0 = deep sleep until morning)</span>
+          </div>
+          <div class="row" style="margin:0;align-items:center;gap:8px;flex-wrap:wrap">
+            <label style="width:120px;font-weight:600;font-size:12.5px">Sleep Entity</label>
+            <input id="ps_quiet_entity" list="entities-dl" placeholder="e.g. input_boolean.sleep_mode" style="flex:1">
+          </div>
+          <div class="chip" style="margin:0;font-size:11px;color:var(--text-secondary)">
+            🌙 <b>Smart Hibernation:</b> Tablet stays asleep until morning or while sleep entity is active, saving ~8 hours of active battery every night.
+          </div>
+        </div>
+      </div></div>
+
+      <!-- Frontlight standard hint -->
+      <div class="chip" style="margin:0;font-size:11px;color:var(--text-secondary);background:var(--bg-card);border:1px solid var(--border)">
+        💡 <b>Frontlight Best Practice:</b> Keep tablet frontlight turned off (0%) by default. Reflective e-ink uses ambient room light and draws zero backlight power.
+      </div>
+    </div>
+
+    <!-- Modal Footer Actions -->
+    <div class="row" style="margin:0;justify-content:flex-end;gap:8px;padding-top:6px;border-top:1px solid var(--border)">
+      <button id="powersynccancel">Cancel</button>
+      <button id="powersyncsave" class="primary" style="font-weight:600;padding:6px 18px">Save &amp; Apply Profile</button>
     </div>
   </div>
 </div>
@@ -2014,6 +2186,7 @@ async function boot() {
   select(Object.keys(spec.pages)[0]);
   buildTemplateLibrary();
   await refreshStatus();
+  await loadDevicePowerProfile("default");
   setInterval(refreshStatus, 15000);
 }
 
@@ -3780,6 +3953,182 @@ $("dlyaml").onclick = async () => {
   a.download = ($("cfg_dev").value.trim() || "crowpanel-epaper") + ".yaml";
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+
+/* ==============================================================================
+   Power & Sync Profile Management
+   ============================================================================== */
+let activePowerProfile = {
+  screen_mode: "interactive",
+  refresh_interval: 15,
+  push_on_entity_change: true,
+  quiet_hours_enabled: true,
+  quiet_hours_start: "23:00",
+  quiet_hours_end: "07:00",
+  quiet_hours_interval: 0,
+  quiet_hours_entity: ""
+};
+
+function updatePowerSyncLabel(prof) {
+  const lbl = $("powersynclabel");
+  if (!lbl) return;
+  const isView = (prof.screen_mode === "view_only");
+  const modeText = isView ? "View-Only" : "Interactive";
+  const intervalText = (prof.refresh_interval <= 0) ? "Touch Only" : `${prof.refresh_interval}m`;
+  lbl.textContent = `${modeText} (${intervalText})`;
+}
+
+async function loadDevicesList() {
+  const sel = $("ps_device");
+  if (!sel) return;
+  try {
+    const list = await api("api/devices").then(r => r.json()).catch(() => []);
+    const devs = Array.isArray(list) ? list : [];
+    if (devs.length > 0) {
+      sel.innerHTML = devs.map(d => `<option value="${esc(d.device_id)}">${esc(d.name || d.device_id)} (${d.display || "boox_go_6"})</option>`).join("");
+    } else {
+      sel.innerHTML = `<option value="default">Default E-Reader</option>`;
+    }
+  } catch (_) {}
+}
+
+async function loadDevicePowerProfile(devId = "default") {
+  try {
+    const d = await api(`api/devices/${encodeURIComponent(devId)}`).then(r => r.json());
+    activePowerProfile = {
+      screen_mode: d.screen_mode || "interactive",
+      refresh_interval: (d.refresh_interval !== undefined) ? Number(d.refresh_interval) : 15,
+      push_on_entity_change: (d.push_on_entity_change !== undefined) ? Boolean(d.push_on_entity_change) : true,
+      quiet_hours_enabled: (d.quiet_hours_enabled !== undefined) ? Boolean(d.quiet_hours_enabled) : true,
+      quiet_hours_start: d.quiet_hours_start || "23:00",
+      quiet_hours_end: d.quiet_hours_end || "07:00",
+      quiet_hours_interval: (d.quiet_hours_interval !== undefined) ? Number(d.quiet_hours_interval) : 0,
+      quiet_hours_entity: d.quiet_hours_entity || ""
+    };
+
+    updatePowerSyncUI(activePowerProfile);
+    updatePowerSyncLabel(activePowerProfile);
+  } catch (err) {
+    console.warn("Failed to load device power profile:", err);
+  }
+}
+
+function updatePowerSyncUI(p) {
+  const isInteractive = (p.screen_mode !== "view_only");
+  $("ps_mode_interactive").classList.toggle("active", isInteractive);
+  $("ps_mode_view_only").classList.toggle("active", !isInteractive);
+
+  $("ps_interval").value = p.refresh_interval;
+  updateIntervalChipsAndHint(p.refresh_interval);
+
+  $("ps_push_entity").checked = p.push_on_entity_change;
+
+  $("ps_quiet_enabled").checked = p.quiet_hours_enabled;
+  $("ps_quiet_start").value = p.quiet_hours_start || "23:00";
+  $("ps_quiet_end").value = p.quiet_hours_end || "07:00";
+  $("ps_quiet_interval").value = p.quiet_hours_interval || 0;
+  $("ps_quiet_entity").value = p.quiet_hours_entity || "";
+  $("ps_quiet_details").style.opacity = p.quiet_hours_enabled ? "1" : "0.4";
+  $("ps_quiet_details").style.pointerEvents = p.quiet_hours_enabled ? "auto" : "none";
+}
+
+function updateIntervalChipsAndHint(val) {
+  const num = parseInt(val, 10);
+  document.querySelectorAll("#ps_interval_presets .chip-preset").forEach(btn => {
+    btn.classList.toggle("active", parseInt(btn.dataset.val, 10) === num);
+  });
+  const hint = $("ps_interval_hint");
+  if (!hint) return;
+  if (num <= 0) {
+    hint.innerHTML = `🔋 <b>Ultra-Low Power (Deep Sleep):</b> Zero periodic background wakeups. Screen refreshes only when touched or when an on-screen entity changes.`;
+  } else if (num === 1) {
+    hint.innerHTML = `⚡ <b>Real-Time Sync (1 min):</b> Screen refreshes every minute. Higher battery consumption; recommended for desk docks or wired mounts.`;
+  } else if (num < 60) {
+    hint.innerHTML = `⏱️ <b>Periodic Wake (${num} min):</b> Tablet wakes every ${num} minutes to update clocks, weather, and sensors. Balanced ambient performance.`;
+  } else {
+    const hours = (num / 60).toFixed(num % 60 === 0 ? 0 : 1);
+    hint.innerHTML = `🌙 <b>Extended Ambient (${hours} hr):</b> Tablet sleeps for ${hours} hours between routine checks. Excellent multi-week battery life.`;
+  }
+}
+
+$("ps_mode_interactive").onclick = () => {
+  activePowerProfile.screen_mode = "interactive";
+  $("ps_mode_interactive").classList.add("active");
+  $("ps_mode_view_only").classList.remove("active");
+};
+
+$("ps_mode_view_only").onclick = () => {
+  activePowerProfile.screen_mode = "view_only";
+  $("ps_mode_view_only").classList.add("active");
+  $("ps_mode_interactive").classList.remove("active");
+};
+
+$("ps_interval").oninput = (e) => {
+  const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+  activePowerProfile.refresh_interval = val;
+  updateIntervalChipsAndHint(val);
+};
+
+document.querySelectorAll("#ps_interval_presets .chip-preset").forEach(btn => {
+  btn.onclick = () => {
+    const val = parseInt(btn.dataset.val, 10);
+    $("ps_interval").value = val;
+    activePowerProfile.refresh_interval = val;
+    updateIntervalChipsAndHint(val);
+  };
+});
+
+$("ps_quiet_enabled").onchange = (e) => {
+  activePowerProfile.quiet_hours_enabled = e.target.checked;
+  $("ps_quiet_details").style.opacity = e.target.checked ? "1" : "0.4";
+  $("ps_quiet_details").style.pointerEvents = e.target.checked ? "auto" : "none";
+};
+
+$("ps_device").onchange = (e) => {
+  loadDevicePowerProfile(e.target.value);
+};
+
+const openPowerSyncModal = async () => {
+  $("powersyncwrap").style.display = "flex";
+  await loadDevicesList();
+  const devId = $("ps_device").value || "default";
+  await loadDevicePowerProfile(devId);
+};
+
+$("powersyncbtn").onclick = openPowerSyncModal;
+if ($("menupowersync")) $("menupowersync").onclick = openPowerSyncModal;
+
+$("powersyncclose").onclick = () => $("powersyncwrap").style.display = "none";
+$("powersynccancel").onclick = () => $("powersyncwrap").style.display = "none";
+$("powersyncwrap").onclick = e => { if (e.target.id === "powersyncwrap") $("powersyncwrap").style.display = "none"; };
+
+$("powersyncsave").onclick = async () => {
+  const devId = $("ps_device").value || "default";
+  const payload = {
+    screen_mode: activePowerProfile.screen_mode,
+    refresh_interval: Math.max(0, parseInt($("ps_interval").value, 10) || 0),
+    push_on_entity_change: $("ps_push_entity").checked,
+    quiet_hours_enabled: $("ps_quiet_enabled").checked,
+    quiet_hours_start: $("ps_quiet_start").value || "23:00",
+    quiet_hours_end: $("ps_quiet_end").value || "07:00",
+    quiet_hours_interval: Math.max(0, parseInt($("ps_quiet_interval").value, 10) || 0),
+    quiet_hours_entity: $("ps_quiet_entity").value.trim(),
+  };
+
+  try {
+    const res = await api(`api/devices/${encodeURIComponent(devId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(r => r.json());
+
+    activePowerProfile = { ...activePowerProfile, ...res };
+    updatePowerSyncLabel(activePowerProfile);
+    $("powersyncwrap").style.display = "none";
+    msg(`⚡ Power profile updated for ${devId}: ${activePowerProfile.screen_mode === "view_only" ? "View-Only" : "Interactive"} (${activePowerProfile.refresh_interval <= 0 ? "Touch Only" : activePowerProfile.refresh_interval + "m"})`);
+  } catch (err) {
+    msg("Failed to save power profile: " + err.message);
+  }
 };
 
 /* Data Sources */

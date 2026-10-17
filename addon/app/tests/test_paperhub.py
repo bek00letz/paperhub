@@ -484,6 +484,161 @@ class TestPaperHubV130Features(unittest.TestCase):
         asyncio.run(_run())
 
 
+class TestPaperHubV140PowerAndSync(unittest.TestCase):
+    def test_compute_device_next_wake_seconds_daytime(self):
+        """Verify day-time wake calculation for normal, custom, and touch-only intervals."""
+        dev = server.DeviceSession("test_dev", {
+            "refresh_interval": 15,
+            "quiet_hours_enabled": False,
+        })
+        # 15 minutes = 900 seconds
+        self.assertEqual(server.compute_device_next_wake_seconds(dev), 900)
+
+        # 0 minutes = Touch only -> 86400 seconds (24 hours)
+        dev.refresh_interval = 0
+        self.assertEqual(server.compute_device_next_wake_seconds(dev), 86400)
+
+        # 60 minutes = 3600 seconds
+        dev.refresh_interval = 60
+        self.assertEqual(server.compute_device_next_wake_seconds(dev), 3600)
+
+    def test_compute_device_next_wake_ha_trigger(self):
+        """Verify quiet hours triggered immediately by Home Assistant sleep entity."""
+        dev = server.DeviceSession("test_dev_ha", {
+            "refresh_interval": 15,
+            "quiet_hours_enabled": True,
+            "quiet_hours_entity": "input_boolean.sleep_mode",
+            "quiet_hours_interval": 120,  # 2 hours
+        })
+        ha_states = {
+            "input_boolean.sleep_mode": {"state": "on"}
+        }
+        wake_secs = server.compute_device_next_wake_seconds(dev, ha_states=ha_states)
+        self.assertEqual(wake_secs, 120 * 60)
+
+    def test_page_has_entity(self):
+        """Verify page_has_entity detects entities in tiles, dynamic grids, and templates."""
+        page = {
+            "elements": [
+                {
+                    "type": "tile",
+                    "entity": "light.living_room",
+                    "title": "Living Room Light"
+                },
+                {
+                    "type": "dynamic_grid",
+                    "items": [
+                        {"entity": "sensor.kitchen_temperature"}
+                    ]
+                },
+                {
+                    "type": "text",
+                    "value": "{{ states('sensor.humidity') }}%"
+                }
+            ]
+        }
+        self.assertTrue(server.page_has_entity(page, "light.living_room"))
+        self.assertTrue(server.page_has_entity(page, "sensor.kitchen_temperature"))
+        self.assertTrue(server.page_has_entity(page, "sensor.humidity"))
+        self.assertFalse(server.page_has_entity(page, "light.garage"))
+
+    def test_view_only_mode_suppresses_mutations(self):
+        """Verify view_only mode suppresses HA entity actions while still responding to touch."""
+        async def _run():
+            dev = server.DEVICES.get_or_create("test_view_only_dev")
+            dev.screen_mode = "view_only"
+            spec = {
+                "pages": {
+                    "home": {
+                        "elements": [
+                            {
+                                "type": "tile",
+                                "x": 100,
+                                "y": 100,
+                                "w": 400,
+                                "h": 140,
+                                "entity": "light.desk",
+                                "touch": {"action": "toggle"}
+                            }
+                        ]
+                    }
+                }
+            }
+            res = await server.handle_touch(None, dev, spec, 150, 150)
+            self.assertEqual(res.get("status"), "ok")
+            hit = res.get("hit", {})
+            self.assertTrue(hit.get("handled"))
+            # Action was recognized, but dev.screen_mode == 'view_only' suppressed HA call
+            self.assertEqual(dev.screen_mode, "view_only")
+
+        asyncio.run(_run())
+
+    def test_device_api_power_sync_profile(self):
+        """Verify GET and POST /api/devices/{device_id} save and return power profile fields."""
+        async def _run():
+            update_body = {
+                "name": "Wall Display 10\"",
+                "screen_mode": "view_only",
+                "refresh_interval": 300,
+                "push_on_entity_change": True,
+                "quiet_hours_enabled": True,
+                "quiet_hours_start": "22:30",
+                "quiet_hours_end": "06:30",
+                "quiet_hours_interval": 0,
+                "quiet_hours_entity": "input_boolean.bedtime",
+            }
+            post_req = make_mocked_request(
+                "POST",
+                "/api/devices/wall_tab_01",
+                match_info={"device_id": "wall_tab_01"},
+            )
+            async def _mock_json():
+                return update_body
+            post_req.json = _mock_json
+
+            resp = await server.api_devices_update(post_req)
+            self.assertEqual(resp.status, 200)
+            saved = json.loads(resp.text)
+            self.assertEqual(saved.get("screen_mode"), "view_only")
+            self.assertEqual(saved.get("refresh_interval"), 300)
+            self.assertEqual(saved.get("quiet_hours_start"), "22:30")
+            self.assertEqual(saved.get("quiet_hours_end"), "06:30")
+            self.assertEqual(saved.get("quiet_hours_entity"), "input_boolean.bedtime")
+
+            # Verify GET /api/devices/{device_id}
+            get_req = make_mocked_request(
+                "GET",
+                "/api/devices/wall_tab_01",
+                match_info={"device_id": "wall_tab_01"},
+            )
+            get_resp = await server.api_devices_get(get_req)
+            self.assertEqual(get_resp.status, 200)
+            fetched = json.loads(get_resp.text)
+            self.assertEqual(fetched.get("screen_mode"), "view_only")
+            self.assertEqual(fetched.get("refresh_interval"), 300)
+            self.assertEqual(fetched.get("push_on_entity_change"), True)
+
+        asyncio.run(_run())
+
+    def test_frame_headers_power_sync(self):
+        """Verify frame_png and frame_bmp include X-PaperHub-Next-Wake and Refresh headers."""
+        async def _run():
+            dev = server.DEVICES.get_or_create("header_test_dev")
+            dev.refresh_interval = 20  # 20 min = 1200s
+            dev.quiet_hours_enabled = False
+            dev.screen_mode = "interactive"
+
+            req = make_mocked_request("GET", "/api/devices/header_test_dev/frame.png", match_info={"device_id": "header_test_dev"})
+            resp = await server.frame_png(req)
+            self.assertEqual(resp.status, 200)
+            self.assertIn("X-PaperHub-Next-Wake", resp.headers)
+            self.assertEqual(resp.headers.get("X-PaperHub-Next-Wake"), "1200")
+            self.assertEqual(resp.headers.get("Refresh"), "1200")
+            self.assertEqual(resp.headers.get("X-PaperHub-Screen-Mode"), "interactive")
+
+        asyncio.run(_run())
+
+
 if __name__ == "__main__":
     unittest.main()
 

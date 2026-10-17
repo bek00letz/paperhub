@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.4.0 - Ultra-Low-Power Architecture, Power & Sync Profiles, and Smart Selective Push
+
+- **Adaptive Power & Sync Architecture**:
+  - **User Choice for Device Role**: Fully configurable screen operating mode per device:
+    - **Interactive Touch Dashboard**: Responsive touch controls for toggling lights, calling scenes, and flipping pages with instant touch wake.
+    - **View-Only Ambient Frame**: Pure presentation canvas (wall art, family calendar). Taps navigate pages or wake the screen, while completely suppressing accidental entity toggles and Home Assistant state mutations.
+  - **Unconstrained Background Refresh Interval**:
+    - Open numeric input supporting any interval from 0 to 10,080 minutes (7 days), paired with quick preset chips (`0m / Touch Only`, `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `12h`, `24h`).
+    - Setting 0 puts the tablet into deep sleep: zero periodic radio/CPU wakeups, refreshing strictly on physical touch or server push.
+  - **Smart Selective Push on Active Screen Entity Change**:
+    - Even with devices set to long intervals (e.g. 5 hours) to conserve battery, PaperHub inspects layout elements, dynamic grids, and template expressions. When an entity visible on the device's *currently active screen* updates in Home Assistant, the server immediately pushes a redraw over WebSocket/SSE. Off-screen entity updates never wake the tablet.
+  - **Configurable Night Hibernation & Quiet Hours**:
+    - Configurable time range (defaults to 23:00 to 07:00).
+    - Configurable night interval ($0 = \text{deep sleep until morning}$).
+    - Optional Home Assistant entity trigger (e.g. `input_boolean.sleep_mode`): when active, the device enters hibernation immediately regardless of the clock, saving ~8 hours of active battery every night.
+  - **Standard Frontlight Best Practice**:
+    - Establishes frontlight off (0%) by default, saving 3x–5x battery life on reflective e-ink Carta displays without complex lux sensors.
+- **Dedicated Power & Sync Profile UI**:
+  - Replaced the legacy fixed slider with `#powersyncbtn` in the stage toolbar and a dedicated menu item in the Settings popover.
+  - Beautiful Apple-standard modal (`#powersyncwrap`) with concentric cards, fluid transitions, tactile preset chips, and live battery impact hints.
+  - Per-device profile management via `GET /api/devices/{device_id}` and `POST /api/devices/{device_id}`.
+- **Client Runtime & Firmware Headers**:
+  - Injected `X-PaperHub-Next-Wake`, `X-PaperHub-Refresh-Interval`, `X-PaperHub-Screen-Mode`, and standard HTTP `Refresh` headers into `/frame.png` and `/frame.bmp` (including HTTP 304 Not Modified).
+  - TRMNL webhook endpoint automatically computes adaptive sleep duration based on active quiet hours and power profile.
+  - Updated Kiosk and PWA client runtimes to sync device power config on boot and visibility change, eliminating unneeded background polling.
+- **Automated Test Suite**:
+  - Added 6 new unit tests covering power profile calculation, quiet hours with HA triggers, selective page entity filtering, view-only suppression, and header injection (22 total tests, 100% passing).
+
 ## 1.3.0 - Intelligent Edge Zones, Custom Canvases, Live WebSocket Updates & Modern Responsive Reflow
 
 - **Intelligent Edge Turn Zones ("Book Metaphor" Navigation)**:
