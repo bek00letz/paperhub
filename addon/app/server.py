@@ -118,26 +118,32 @@ def eval_fixture_template(tpl: str) -> str:
         expr = s
 
     if "to_json" in expr:
-        m_cal = re.search(r"states\('([^']*(?:calendar)[^']*)'\)", expr)
-        if m_cal:
-            eid = m_cal.group(1)
+        m_ent = re.search(r"states\('([^']+)'\)", expr)
+        if m_ent:
+            eid = m_ent.group(1)
             st = states.get(eid) or {}
+            if "calendar" in eid:
+                return json.dumps({
+                    "state": st.get("state", "on"),
+                    "message": st.get("message", "Calendar Event"),
+                    "start_time": st.get("start_time", "10:00"),
+                    "end_time": st.get("end_time", "11:00"),
+                    "location": st.get("location", ""),
+                    "events": st.get("events", []),
+                })
+            if "weather" in eid:
+                return json.dumps({
+                    "temperature": st.get("temperature", 21.5),
+                    "condition": st.get("condition") or st.get("state", "partlycloudy"),
+                    "forecast": st.get("forecast", []),
+                })
+            # Tile state & attributes
+            name = st.get("friendly_name") or eid.split(".")[-1].replace("_", " ").title()
             return json.dumps({
                 "state": st.get("state", "on"),
-                "message": st.get("message", "Calendar Event"),
-                "start_time": st.get("start_time", "10:00"),
-                "end_time": st.get("end_time", "11:00"),
-                "location": st.get("location", ""),
-                "events": st.get("events", []),
-            })
-        m_wea = re.search(r"states\('([^']*(?:weather)[^']*)'\)", expr)
-        if m_wea:
-            eid = m_wea.group(1)
-            st = states.get(eid) or {}
-            return json.dumps({
-                "temperature": st.get("temperature", 21.5),
-                "condition": st.get("condition") or st.get("state", "partlycloudy"),
-                "forecast": st.get("forecast", []),
+                "name": name,
+                "brightness": st.get("brightness", 255),
+                "unit": st.get("unit_of_measurement", ""),
             })
 
     # Handle `is_state('entity', 'val')`
@@ -620,12 +626,15 @@ async def api_touch(request):
     dev = DEVICES.get_or_create(dev_id)
 
     x, y, gesture = None, None, ""
+    client_page = None
+    body = {}
     if request.method == "POST":
         try:
             body = await request.json()
             x = body.get("x")
             y = body.get("y")
             gesture = body.get("gesture", "")
+            client_page = body.get("page")
         except Exception:
             pass
 
@@ -636,6 +645,44 @@ async def api_touch(request):
             gesture = request.query.get("gesture", gesture)
         except Exception:
             x, y = 0, 0
+
+    # If the visual editor sent its live in-memory page for simulation:
+    if client_page and isinstance(client_page, dict):
+        disp_name = body.get("display") or dev.display
+        orient = int(body.get("orientation", dev.orientation))
+        edge_ratio = float(body.get("edge_nav_ratio", 0.15)) if body.get("edge_nav", True) else 0.0
+        hit = layout.hit_test(
+            client_page,
+            x,
+            y,
+            display=disp_name,
+            orientation=orient,
+            edge_nav_ratio=edge_ratio,
+        )
+        if hit.get("handled"):
+            hit_type = hit.get("type")
+            if hit_type == "element_action":
+                act = hit.get("action")
+                ent = hit.get("entity")
+                srv = hit.get("service")
+                data = hit.get("data") or {}
+                if act == "toggle" and ent:
+                    await call_ha_service(SHARED_SESSION, "homeassistant", "toggle", {"entity_id": ent})
+                elif act in ("turn_on", "turn_off") and ent:
+                    await call_ha_service(SHARED_SESSION, "homeassistant", act, {"entity_id": ent})
+                elif srv:
+                    parts = srv.split(".", 1)
+                    if len(parts) == 2:
+                        d, s = parts
+                        if ent and "entity_id" not in data:
+                            data["entity_id"] = ent
+                        await call_ha_service(SHARED_SESSION, d, s, data)
+        return web.json_response({
+            "status": "ok",
+            "hit": hit,
+            "page": dev.active_page,
+            "simulated": True,
+        })
 
     spec = load_layouts()
     result = await handle_touch(SHARED_SESSION, dev, spec, x, y, gesture)

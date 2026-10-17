@@ -250,5 +250,143 @@ class TestServerEndpoints(unittest.TestCase):
         asyncio.run(_run())
 
 
+class TestAppleHomeTilesAndSimulation(unittest.TestCase):
+    def test_tile_rendering(self):
+        """Verify Apple Home control tiles render with concentric geometry and high contrast in < 20ms."""
+        tile_on = {
+            "type": "tile",
+            "x": 64,
+            "y": 64,
+            "w": 456,
+            "h": 140,
+            "radius": 24,
+            "style": "standard",
+            "entity": "light.living_room_ceiling",
+            "title": "Ceiling Light",
+            "icon": "mdi:ceiling-light",
+            "icon_off": "mdi:ceiling-light-outline",
+            "touch": {"action": "toggle"}
+        }
+        tile_off = {
+            "type": "tile",
+            "x": 552,
+            "y": 64,
+            "w": 456,
+            "h": 140,
+            "radius": 24,
+            "style": "standard",
+            "entity": "light.reading_lamp",
+            "title": "Reading Lamp",
+            "icon": "mdi:lamp",
+            "icon_off": "mdi:lamp-outline",
+            "touch": {"action": "toggle"}
+        }
+        tile_inverted = {
+            "type": "tile",
+            "x": 64,
+            "y": 230,
+            "w": 456,
+            "h": 140,
+            "radius": 24,
+            "style": "inverted",
+            "entity": "switch.living_room_fan",
+            "title": "Ceiling Fan",
+            "icon": "mdi:fan",
+            "touch": {"action": "toggle"}
+        }
+        page = {
+            "elements": [tile_on, tile_off, tile_inverted]
+        }
+        vals = {
+            0: {"state": "on", "name": "Ceiling Light", "brightness": 204},
+            1: {"state": "off", "name": "Reading Lamp"},
+            2: {"state": "on", "name": "Ceiling Fan"},
+        }
+
+        t0 = time.perf_counter()
+        img = L.render_page(page, vals, display="boox_go_6")
+        dt_ms = (time.perf_counter() - t0) * 1000
+
+        self.assertEqual(img.size, (1072, 1448))
+        self.assertEqual(img.mode, "L")
+        self.assertLess(dt_ms, 25.0, f"Tile rendering too slow: {dt_ms:.2f}ms")
+
+    def test_tile_hit_test(self):
+        """Verify tile is automatically recognized as an interactive target even without explicit touch dict."""
+        page = {
+            "elements": [
+                {
+                    "type": "tile",
+                    "x": 100,
+                    "y": 100,
+                    "w": 400,
+                    "h": 140,
+                    "entity": "light.desk",
+                    "title": "Desk Lamp"
+                }
+            ]
+        }
+        # Hit inside tile
+        res = L.hit_test(page, 200, 150, display="boox_go_6", orientation=0, edge_nav_ratio=0.0)
+        self.assertTrue(res.get("handled"))
+        self.assertEqual(res.get("type"), "element_action")
+        self.assertEqual(res.get("action"), "toggle")
+        self.assertEqual(res.get("entity"), "light.desk")
+
+        # Miss outside tile
+        res_miss = L.hit_test(page, 50, 50, display="boox_go_6", orientation=0, edge_nav_ratio=0.0)
+        self.assertFalse(res_miss.get("handled"))
+
+    def test_live_page_touch_simulation(self):
+        """Verify api_touch accepts in-memory client page for instant simulation."""
+        async def _run():
+            sim_page = {
+                "name": "Live Simulation Canvas",
+                "elements": [
+                    {
+                        "type": "tile",
+                        "x": 64,
+                        "y": 200,
+                        "w": 456,
+                        "h": 140,
+                        "entity": "light.office",
+                        "title": "Office Lights",
+                        "touch": {"action": "toggle"}
+                    }
+                ]
+            }
+            body = {
+                "x": 200,
+                "y": 250,
+                "page": sim_page,
+                "display": "boox_go_6",
+                "orientation": 0,
+                "edge_nav": True,
+                "edge_nav_ratio": 0.15
+            }
+            req = make_mocked_request(
+                "POST",
+                "/api/touch",
+                headers={"Content-Type": "application/json"},
+            )
+            # Mock json body
+            async def _mock_json():
+                return body
+            req.json = _mock_json
+
+            resp = await server.api_touch(req)
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.text)
+            self.assertEqual(data.get("status"), "ok")
+            self.assertTrue(data.get("simulated"))
+            hit = data.get("hit", {})
+            self.assertTrue(hit.get("handled"))
+            self.assertEqual(hit.get("action"), "toggle")
+            self.assertEqual(hit.get("entity"), "light.office")
+
+        asyncio.run(_run())
+
+
 if __name__ == "__main__":
     unittest.main()
+

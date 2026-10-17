@@ -40,87 +40,143 @@
           "icon": "mdi:home-variant-outline"
         },
         {
-          "type": "card",
+          "type": "tile",
           "x": 64,
           "y": 210,
-          "w": 944,
-          "h": 190,
+          "w": 456,
+          "h": 140,
           "radius": 24,
-          "shadow": true,
+          "style": "standard",
+          "entity": "light.living_room_ceiling",
+          "title": "Ceiling Light",
+          "icon": "mdi:ceiling-light",
+          "icon_off": "mdi:ceiling-light-outline",
+          "action": "toggle",
+          "touch": {
+            "action": "toggle"
+          }
+        },
+        {
+          "type": "tile",
+          "x": 552,
+          "y": 210,
+          "w": 456,
+          "h": 140,
+          "radius": 24,
+          "style": "standard",
+          "entity": "light.reading_lamp",
+          "title": "Reading Lamp",
+          "icon": "mdi:lamp",
+          "icon_off": "mdi:lamp-outline",
+          "action": "toggle",
+          "touch": {
+            "action": "toggle"
+          }
+        },
+        {
+          "type": "tile",
+          "x": 64,
+          "y": 374,
+          "w": 456,
+          "h": 140,
+          "radius": 24,
+          "style": "standard",
+          "entity": "switch.living_room_fan",
+          "title": "Ceiling Fan",
+          "icon": "mdi:fan",
+          "icon_off": "mdi:fan-off",
+          "action": "toggle",
+          "touch": {
+            "action": "toggle"
+          }
+        },
+        {
+          "type": "tile",
+          "x": 552,
+          "y": 374,
+          "w": 456,
+          "h": 140,
+          "radius": 24,
+          "style": "standard",
+          "entity": "climate.living_room",
+          "title": "Thermostat",
+          "subtitle": "21.5°C • Comfort",
+          "icon": "mdi:thermostat",
+          "icon_off": "mdi:thermostat-box",
           "action": "navigate_page",
           "target_page": "climate",
-          "icon": "mdi:thermostat",
-          "label": "21.5°C  •  Living Room Comfort",
           "touch": {
             "action": "navigate_page",
             "target_page": "climate"
           }
         },
         {
-          "type": "dynamic_grid",
+          "type": "tile",
           "x": 64,
-          "y": 430,
-          "w": 944,
-          "h": 500,
-          "radius": 20,
-          "gap": 16,
-          "items": [
-            {
-              "entity": "light.living_room_ceiling",
-              "name": "Ceiling Light",
-              "icon": "mdi:ceiling-light",
-              "state": "on",
-              "action": "toggle"
-            },
-            {
-              "entity": "light.reading_lamp",
-              "name": "Reading Lamp",
-              "icon": "mdi:lamp",
-              "state": "off",
-              "action": "toggle"
-            },
-            {
-              "entity": "switch.living_room_fan",
-              "name": "Ceiling Fan",
-              "icon": "mdi:fan",
-              "state": "on",
-              "action": "toggle"
-            },
-            {
-              "entity": "media_player.living_room_speaker",
-              "name": "Media Player",
-              "icon": "mdi:speaker",
-              "state": "playing",
-              "action": "navigate_page",
-              "target_page": "scenes"
-            }
-          ]
+          "y": 538,
+          "w": 456,
+          "h": 140,
+          "radius": 24,
+          "style": "standard",
+          "entity": "media_player.living_room_speaker",
+          "title": "Sonos Speaker",
+          "subtitle": "Amber Ambient",
+          "icon": "mdi:speaker",
+          "icon_off": "mdi:speaker-off",
+          "action": "navigate_page",
+          "target_page": "scenes",
+          "touch": {
+            "action": "navigate_page",
+            "target_page": "scenes"
+          }
         },
         {
-          "type": "card",
-          "x": 64,
-          "y": 960,
-          "w": 944,
-          "h": 180,
+          "type": "tile",
+          "x": 552,
+          "y": 538,
+          "w": 456,
+          "h": 140,
           "radius": 24,
-          "shadow": true,
-          "action": "toggle",
-          "entity": "media_player.living_room_speaker",
-          "icon": "mdi:play-circle-outline",
-          "label": "Now Playing: Amber Ambient • Tycho",
+          "style": "standard",
+          "entity": "scene.evening_relax",
+          "title": "Evening Relax",
+          "subtitle": "Warm Glow",
+          "icon": "mdi:weather-night",
+          "icon_off": "mdi:weather-night",
+          "action": "turn_on",
           "touch": {
-            "action": "call_service",
-            "service": "media_player.media_play_pause",
-            "entity": "media_player.living_room_speaker"
+            "action": "turn_on"
           }
+        },
+        {
+          "type": "weather_forecast",
+          "x": 64,
+          "y": 710,
+          "w": 944,
+          "h": 260,
+          "radius": 24,
+          "entity": "weather.home",
+          "title": "5-Day Weather Outlook",
+          "days": 5
+        },
+        {
+          "type": "calendar_timeline",
+          "x": 64,
+          "y": 994,
+          "w": 944,
+          "h": 360,
+          "radius": 24,
+          "entity": "calendar.personal",
+          "title": "Today's Schedule",
+          "max_events": 3
         },
         {
           "type": "text",
           "x": 64,
-          "y": 1180,
+          "y": 1380,
           "w": 944,
-          "h": 80,
-          "value": "Tap left/right edge or swipe to navigate pages",
+          "h": 40,
+          "value": "Tap left / right edge to turn pages",
           "size": 20,
           "bold": false,
           "color": "muted",

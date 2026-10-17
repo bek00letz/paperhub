@@ -1260,17 +1260,24 @@ aside {
 
     <!-- Quick Add Elements Card -->
     <div class="card">
-      <h3>Add New Element</h3>
+      <h3>Interactive Controls</h3>
       <div class="body">
         <div class="pal">
-          <button data-add="number"><span class="icon">#️⃣</span><span>Number</span></button>
-          <button data-add="text"><span class="icon">🔤</span><span>Text</span></button>
-          <button data-add="icon"><span class="icon">⭐</span><span>Icon</span></button>
-          <button data-add="curve"><span class="icon">📈</span><span>Graph</span></button>
-          <button data-add="line"><span class="icon">➖</span><span>Divider</span></button>
-          <button data-add="dynamic_grid"><span class="icon">🔲</span><span>Dynamic Grid</span></button>
+          <button data-add="tile" style="border-color:var(--accent);font-weight:600"><span class="icon">💡</span><span>Light Tile</span></button>
+          <button data-add="switch_tile"><span class="icon">🔌</span><span>Switch Tile</span></button>
+          <button data-add="climate_tile"><span class="icon">❄️</span><span>Climate</span></button>
+          <button data-add="sensor_tile"><span class="icon">🌡️</span><span>Sensor</span></button>
+          <button data-add="action_tile"><span class="icon">⚡</span><span>Action</span></button>
           <button data-add="calendar_timeline"><span class="icon">📅</span><span>Timeline</span></button>
           <button data-add="weather_forecast"><span class="icon">🌤️</span><span>Weather</span></button>
+          <button data-add="dynamic_grid"><span class="icon">🔲</span><span>Grid</span></button>
+        </div>
+        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin:10px 0 6px 2px">Typography &amp; Accents</div>
+        <div class="pal" style="grid-template-columns:repeat(4,1fr)">
+          <button data-add="text" class="sm" title="Header or label"><span class="icon">🔤</span><span>Text</span></button>
+          <button data-add="curve" class="sm" title="Sensor history sparkline"><span class="icon">📈</span><span>Graph</span></button>
+          <button data-add="line" class="sm" title="Divider rule"><span class="icon">➖</span><span>Line</span></button>
+          <button data-add="icon" class="sm" title="Standalone icon glyph"><span class="icon">⭐</span><span>Icon</span></button>
         </div>
       </div>
     </div>
@@ -1285,12 +1292,13 @@ aside {
         <!-- Filter chips for fast zero-friction discovery -->
         <div class="cat-tabs" id="domain-filters">
           <span class="cat-chip active" data-domain="">All</span>
-          <span class="cat-chip" data-domain="calendar">📅 Dates</span>
+          <span class="cat-chip" data-domain="light">💡 Lights</span>
+          <span class="cat-chip" data-domain="switch">🔌 Switches</span>
+          <span class="cat-chip" data-domain="climate">❄️ Climate</span>
           <span class="cat-chip" data-domain="sensor">🌡️ Sensors</span>
           <span class="cat-chip" data-domain="binary_sensor">⚡ Binary</span>
-          <span class="cat-chip" data-domain="climate">❄️ Climate</span>
-          <span class="cat-chip" data-domain="lock">🔒 Security</span>
-          <span class="cat-chip" data-domain="person">👤 People</span>
+          <span class="cat-chip" data-domain="calendar">📅 Dates</span>
+          <span class="cat-chip" data-domain="scene">🎬 Scenes</span>
         </div>
         <input id="search" placeholder="Search friendly name or id…" style="width:100%;margin-bottom:8px">
         <div id="ents"></div>
@@ -2355,10 +2363,10 @@ async function simulateTouchTap(e) {
   ripple.style.width = "28px";
   ripple.style.height = "28px";
   ripple.style.borderRadius = "50%";
-  ripple.style.background = "rgba(2, 132, 199, 0.4)";
+  ripple.style.background = "rgba(2, 132, 199, 0.45)";
   ripple.style.border = "2px solid #0284c7";
   ripple.style.transform = "translate(-50%, -50%) scale(0.6)";
-  ripple.style.transition = "transform 0.28s ease, opacity 0.28s ease";
+  ripple.style.transition = "transform 0.28s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.28s ease";
   ripple.style.pointerEvents = "none";
   ripple.style.zIndex = "999";
   canvas.appendChild(ripple);
@@ -2366,37 +2374,51 @@ async function simulateTouchTap(e) {
     ripple.style.transform = "translate(-50%, -50%) scale(1.6)";
     ripple.style.opacity = "0";
   });
-  setTimeout(() => ripple.remove(), 300);
+  setTimeout(() => ripple.remove(), 320);
 
   try {
     const res = await api(`api/touch?device=editor_preview&x=${tx}&y=${ty}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ x: tx, y: ty })
+      body: JSON.stringify({
+        x: tx,
+        y: ty,
+        page: page(),
+        display: curDisplay().id,
+        orientation: Number(spec.orientation || 0),
+        edge_nav: spec.edge_nav !== false,
+        edge_nav_ratio: Number(spec.edge_nav_ratio || 0.15)
+      })
     });
     const data = await res.json();
     const hit = data.hit || {};
     if (hit.handled) {
       if (hit.type === "nav_prev" || hit.type === "nav_next") {
-        msg(`📖 Book Navigation: Switched to page '${data.page}'`);
-        if (data.page && spec.pages[data.page]) {
-          cur = data.page;
-          paint();
+        const pages = Object.keys(spec.pages || {});
+        const curIdx = pages.indexOf(cur);
+        if (curIdx >= 0 && pages.length > 1) {
+          const nextIdx = hit.type === "nav_next" ? (curIdx + 1) % pages.length : (curIdx - 1 + pages.length) % pages.length;
+          select(pages[nextIdx]);
+          msg(`📖 Book Navigation: Turned page to '${pages[nextIdx]}'`);
+        } else {
+          msg(`📖 Edge Tap (${hit.edge}): Page turn registered`);
         }
       } else if (hit.action === "navigate_page" || hit.target_page) {
         const tgt = hit.target_page || hit.action;
-        msg(`🎯 Navigation Action: Jumped to page '${tgt}'`);
         if (tgt && spec.pages[tgt]) {
-          cur = tgt;
-          paint();
+          select(tgt);
+          msg(`🎯 Navigation Action: Jumped to page '${tgt}'`);
+        } else {
+          msg(`🎯 Navigation Action: Target page '${tgt}'`);
         }
       } else {
-        msg(`🎯 Touch Hit: ${hit.action || "action"} on ${hit.entity || hit.element_type || "element"}`);
+        const targetDesc = hit.entity ? `"${hit.entity}"` : hit.element_type || "tile";
+        msg(`🎯 Touch Triggered: ${hit.action || "toggle"} on ${targetDesc}`);
+        setTimeout(preview, 150);
       }
     } else {
-      msg(`👆 Tap at (${tx}, ${ty}) - no action bound`);
+      msg(`👆 Tap at (${tx}, ${ty}) — empty canvas area`);
     }
-    preview();
   } catch (err) {
     msg(`Simulated touch: ${err.message}`);
   }
@@ -2492,7 +2514,56 @@ document.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
   snapshot();
   const t = b.dataset.add;
   const m = curMargin(), maxW = curW() - m * 2;
-  const base = { type: t, x: m, y: 60, w: Math.min(t === "line" ? 240 : 260, maxW), h: t === "line" ? 4 : 90 };
+  const isTile = ["tile", "light_tile", "switch_tile", "climate_tile", "sensor_tile", "action_tile"].includes(t);
+  const defaultTileW = maxW > 600 ? Math.min(456, Math.floor((maxW - 16) / 2)) : maxW;
+  const base = {
+    type: isTile ? "tile" : t,
+    x: m,
+    y: 60,
+    w: isTile ? defaultTileW : Math.min(t === "line" ? 240 : 260, maxW),
+    h: isTile ? 140 : (t === "line" ? 4 : 90)
+  };
+  if (isTile) {
+    base.radius = 22;
+    base.style = "standard";
+    if (t === "switch_tile") {
+      base.title = "Wall Outlet";
+      base.entity = "switch.living_room";
+      base.icon = "mdi:power-socket-eu";
+      base.icon_off = "mdi:power-socket-eu";
+      base.touch = { action: "toggle" };
+      base.action = "toggle";
+    } else if (t === "climate_tile") {
+      base.title = "Thermostat";
+      base.entity = "climate.living_room";
+      base.icon = "mdi:thermostat";
+      base.icon_off = "mdi:thermostat-box";
+      base.touch = { action: "toggle" };
+      base.action = "toggle";
+    } else if (t === "sensor_tile") {
+      base.title = "Indoor Temp";
+      base.entity = "sensor.living_room_temperature";
+      base.icon = "mdi:thermometer";
+      base.icon_off = "mdi:thermometer-low";
+      base.touch = { action: "none" };
+      base.action = "none";
+    } else if (t === "action_tile") {
+      base.title = "Good Night";
+      base.entity = "scene.good_night";
+      base.icon = "mdi:weather-night";
+      base.icon_off = "mdi:weather-night";
+      base.touch = { action: "turn_on" };
+      base.action = "turn_on";
+    } else {
+      // Default light tile
+      base.title = "Ceiling Light";
+      base.entity = "light.living_room";
+      base.icon = "mdi:lightbulb";
+      base.icon_off = "mdi:lightbulb-outline";
+      base.touch = { action: "toggle" };
+      base.action = "toggle";
+    }
+  }
   if (t === "number") { base.entity = ""; base.show = "state"; base.decimals = 1; base.align = "left"; }
   if (t === "text") { base.value = "Label"; base.size = 30; base.bold = false; base.align = "left"; }
   if (t === "icon") { base.icon = "mdi:home"; base.w = 110; base.h = 110; }
@@ -2596,27 +2667,66 @@ function addEntityToCanvas(id, posX, posY) {
   snapshot();
   const cw = curW(), ch = curH(), m = curMargin();
   const known = ents.find(x => x.entity_id === id);
-  const numeric = known && known.state !== "" && !isNaN(Number(known.state));
-  const isCalendar = id.startsWith("calendar.");
-  const w = Math.min(260, cw - m * 2);
-  const x = posX !== undefined ? Math.max(0, Math.min(cw - w, posX)) : m;
-  const y = posY !== undefined ? Math.max(0, Math.min(ch - 90, posY)) : 60;
+  const domain = (id || "").split(".")[0];
+  const friendly = (known && known.name) ? known.name : id.split(".").pop().replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  const icon = suggestIconForEntity(id, friendly);
+  const iconOff = icon.endsWith("-outline") ? icon : (icon + "-outline");
 
-  const el = {
-    type: numeric ? "number" : "text",
-    entity: id,
-    show: isCalendar ? "days_until" : "state",
-    align: "left",
-    x, y, w, h: 90
-  };
-  if (numeric) {
-    el.decimals = String(known.state).includes(".") ? 1 : 0;
-    if (known.unit) el.suffix = " " + known.unit;
-  }
+  const isCalendar = domain === "calendar";
+  const isWeather = domain === "weather";
+
   if (isCalendar) {
-    el.suffix = " days";
+    const w = Math.min(cw - m * 2, 944);
+    const h = 340;
+    const x = posX !== undefined ? Math.max(0, Math.min(cw - w, posX)) : m;
+    const y = posY !== undefined ? Math.max(0, Math.min(ch - h, posY)) : 60;
+    els().push({
+      type: "calendar_timeline",
+      entity: id,
+      title: friendly || "Schedule",
+      max_events: 4,
+      radius: 20,
+      x, y, w, h
+    });
+  } else if (isWeather) {
+    const w = Math.min(cw - m * 2, 944);
+    const h = 260;
+    const x = posX !== undefined ? Math.max(0, Math.min(cw - w, posX)) : m;
+    const y = posY !== undefined ? Math.max(0, Math.min(ch - h, posY)) : 60;
+    els().push({
+      type: "weather_forecast",
+      entity: id,
+      title: friendly || "Weather Forecast",
+      days: 5,
+      radius: 20,
+      x, y, w, h
+    });
+  } else {
+    // Apple Home Control Tile
+    const maxW = cw - m * 2;
+    const w = maxW > 600 ? Math.min(456, Math.floor((maxW - 16) / 2)) : maxW;
+    const h = 140;
+    const x = posX !== undefined ? Math.max(0, Math.min(cw - w, posX)) : m;
+    const y = posY !== undefined ? Math.max(0, Math.min(ch - h, posY)) : 60;
+
+    let act = "toggle";
+    if (domain === "sensor" || domain === "binary_sensor") act = "none";
+    else if (domain === "scene" || domain === "script") act = "turn_on";
+
+    const el = {
+      type: "tile",
+      entity: id,
+      title: friendly,
+      icon: icon,
+      icon_off: iconOff,
+      radius: 22,
+      style: "standard",
+      action: act,
+      touch: { action: act },
+      x, y, w, h
+    };
+    els().push(el);
   }
-  els().push(el);
   sel = els().length - 1;
   paint(); preview();
 }
@@ -2803,7 +2913,37 @@ function props() {
     <input data-k="${k}" type="${type}"${dl ? ` list="${dl}"` : ""} placeholder="${ph}" value="${esc(el[k] ?? "")}"></div>`;
 
   let h = '<div class="grp"><div class="lbl">Content &amp; Source</div>';
-  if (el.type === "text" || el.type === "number") h += contentRows(el);
+  if (["tile", "light_tile", "switch_tile", "climate_tile", "sensor_tile", "action_tile"].includes(el.type)) {
+    h += `<div class="row"><label>title</label><input data-k="title" id="tile_title_inp" type="text" placeholder="e.g. Ceiling Light" value="${esc(el.title || el.name || '')}"></div>
+      <div class="row"><label>entity</label><input data-k="entity" id="tile_ent_inp" type="text" list="entities-dl" placeholder="light.living_room" value="${esc(el.entity || '')}"></div>
+      <div class="row"><label>subtitle</label><input data-k="subtitle" type="text" placeholder="Auto (On • 80% / Off) or Jinja template" value="${esc(el.subtitle || '')}"></div>
+      <div class="row"><label>active icon</label>
+        <div style="display:flex;gap:6px;align-items:center;flex:1">
+          <button id="tile_browse_icon_btn" class="icon-pick-btn" title="Choose active icon visually">${getMdiGlyph(el.icon) || "󰀲"}</button>
+          <input data-k="icon" id="tile_icon_inp" type="text" placeholder="mdi:lightbulb" value="${esc(el.icon || '')}" style="flex:1">
+          <button id="tile_browse_icon" class="sm">Browse…</button>
+        </div>
+      </div>
+      <div class="row"><label>off icon</label>
+        <div style="display:flex;gap:6px;align-items:center;flex:1">
+          <button id="tile_browse_off_icon_btn" class="icon-pick-btn" title="Choose off icon visually">${getMdiGlyph(el.icon_off) || "󰀲"}</button>
+          <input data-k="icon_off" id="tile_icon_off_inp" type="text" placeholder="mdi:lightbulb-outline" value="${esc(el.icon_off || '')}" style="flex:1">
+          <button id="tile_browse_off_icon" class="sm">Browse…</button>
+        </div>
+      </div>
+      <div class="row"><label>card style</label>
+        <select data-k="style">
+          <option value="standard"${(el.style || 'standard') === 'standard' ? ' selected' : ''}>Standard (Light Card + Inverted Well when On)</option>
+          <option value="inverted"${el.style === 'inverted' ? ' selected' : ''}>Inverted (Solid Black Card when On)</option>
+        </select>
+      </div>
+      <div class="row"><label>corner radius</label>
+        <input data-k="radius" type="number" placeholder="22" value="${esc(el.radius ?? 22)}">
+      </div>
+      <div class="row"><label>badge</label>
+        <input data-k="badge" type="text" placeholder="Optional top-right badge" value="${esc(el.badge || '')}">
+      </div>`;
+  } else if (el.type === "text" || el.type === "number") h += contentRows(el);
   else if (el.type === "icon") {
     h += `<div class="row"><label>icon</label>
       <div style="display:flex;gap:6px;align-items:center;flex:1">
@@ -3195,6 +3335,39 @@ function props() {
       paint(); preview(); props();
     };
   });
+
+  // Tile icon picker buttons
+  const pickTileIcon = () => openPicker(el.icon || "", (ic) => {
+    snapshot(); el.icon = ic; paint(); preview(); props();
+  });
+  if ($("tile_browse_icon_btn")) $("tile_browse_icon_btn").onclick = pickTileIcon;
+  if ($("tile_browse_icon")) $("tile_browse_icon").onclick = pickTileIcon;
+
+  const pickTileOffIcon = () => openPicker(el.icon_off || "", (ic) => {
+    snapshot(); el.icon_off = ic; paint(); preview(); props();
+  });
+  if ($("tile_browse_off_icon_btn")) $("tile_browse_off_icon_btn").onclick = pickTileOffIcon;
+  if ($("tile_browse_off_icon")) $("tile_browse_off_icon").onclick = pickTileOffIcon;
+
+  const tileEntInp = box.querySelector("#tile_ent_inp");
+  if (tileEntInp) {
+    tileEntInp.onchange = () => {
+      snapshot();
+      const val = (tileEntInp.value || "").trim();
+      el.entity = val;
+      const match = ents.find(x => x.entity_id === val);
+      const friendly = match ? (match.name || "") : val.split(".").pop().replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      if (!el.title || el.title === "Accessory" || el.title === "Ceiling Light" || el.title === "Wall Outlet") {
+        el.title = friendly;
+      }
+      if (!el.icon || el.icon === "mdi:power" || el.icon === "mdi:lightbulb") {
+        const ic = suggestIconForEntity(val, friendly);
+        el.icon = ic;
+        el.icon_off = ic.endsWith("-outline") ? ic : (ic + "-outline");
+      }
+      paint(); preview(); props();
+    };
+  }
 
   // Icon element picker buttons
   const pickElIcon = () => openPicker(el.icon || "", (ic) => {

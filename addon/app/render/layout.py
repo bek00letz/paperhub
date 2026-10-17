@@ -109,7 +109,7 @@ def _draw_icon_glyph(draw, name, cx, cy, size, color=T.BLACK):
     cp = mdi_codepoint(s)
     if not cp:
         return
-    ch = chr(int(cp, 16))
+    ch = chr(int(cp, 16) if isinstance(cp, str) and not cp.isdigit() else int(cp))
     f = _mdi_font(size)
     l, t, r, b = f.getbbox(ch)
     draw.text((cx - (r + l) // 2, cy - (b + t) // 2), ch, font=f, fill=color)
@@ -379,6 +379,201 @@ def _draw_button(img, draw, el, val="", display=None):
     elif label:
         f = T.font(max(14, int(h * 0.3)), bold=True)
         draw.text((x + w // 2, y + h // 2), label, font=f, fill=color, anchor="mm")
+
+
+def _draw_tile(img, draw, el, val="", display=None):
+    """Draw an interactive Apple Home Control Tile.
+
+    Features:
+    - Apple concentric squircle card geometry (R_outer = radius, R_inner = radius - padding)
+    - True 16-level grayscale Carta anti-aliasing
+    - State-aware styling:
+      * Standard style: Crisp surface, hairline border, ambient drop shadow.
+        When ON: High-contrast solid black circular icon well with inverted white MDI glyph,
+                 bold primary title, active status subtitle, top-right active accent pill.
+        When OFF: Subtle surface, outline circular icon well with muted dark-gray outline glyph,
+                  crisp title, muted secondary subtitle ('Off').
+      * Inverted style: Deep Carta black filled card when ON, white card when OFF.
+    - Responsive layout:
+      * Horizontal (wide): Left circular icon well, right two-line typographic stack.
+      * Vertical (square/compact): Top-left icon well, bottom-left typographic stack.
+    """
+    x, y, w, h = _clamp_box(el, default_w=280, default_h=130, display=display)
+    radius = int(el.get("radius", 22))
+    style = el.get("style", "standard")
+    is_pressed = bool(el.get("pressed", False))
+
+    # Parse state & metadata from template resolution
+    data = {}
+    if isinstance(val, dict):
+        data = val
+    elif isinstance(val, str) and val.strip().startswith("{"):
+        try:
+            data = json.loads(val)
+        except Exception:
+            pass
+
+    state_raw = str(data.get("state") if "state" in data else val or el.get("state", "off")).strip()
+    state_lower = state_raw.lower()
+    is_on = state_lower in ("on", "playing", "open", "active", "home", "unlocked") or (
+        state_lower.replace(".", "", 1).isdigit() and float(state_lower) > 0
+    )
+
+    # Resolve Title
+    title = str(el.get("title") or data.get("name") or el.get("name") or "")
+    if not title:
+        ent = str(el.get("entity") or "")
+        title = ent.split(".")[-1].replace("_", " ").title() if ent else "Accessory"
+
+    # Resolve Subtitle
+    if "sub" in data:
+        subtitle = str(data["sub"])
+    elif el.get("subtitle") and "{{" not in el.get("subtitle", ""):
+        subtitle = str(el["subtitle"])
+    elif state_lower in ("on", "off"):
+        if is_on and data.get("brightness"):
+            try:
+                pct = int(round(int(data["brightness"]) / 255.0 * 100.0))
+                subtitle = f"On • {pct}%"
+            except (ValueError, TypeError):
+                subtitle = "On"
+        else:
+            subtitle = "On" if is_on else "Off"
+    elif state_lower:
+        unit = data.get("unit") or el.get("unit", "")
+        subtitle = f"{state_raw} {unit}".strip()
+    else:
+        subtitle = "Off"
+
+    # Resolve Icons
+    domain = el.get("entity", "").split(".")[0] if el.get("entity") else ""
+    default_icon = "mdi:power"
+    if domain == "light":
+        default_icon = "mdi:lightbulb"
+    elif domain == "switch":
+        default_icon = "mdi:power-socket-eu"
+    elif domain == "climate":
+        default_icon = "mdi:thermostat"
+    elif domain == "media_player":
+        default_icon = "mdi:speaker"
+    elif domain in ("scene", "script"):
+        default_icon = "mdi:play-circle"
+    elif domain == "sensor":
+        default_icon = "mdi:gauge"
+
+    active_icon = el.get("icon") or default_icon
+    off_icon = el.get("icon_off") or (
+        active_icon.removesuffix("-outline") + "-outline" if not active_icon.endswith("-outline") else active_icon
+    )
+    icon_name = active_icon if is_on else off_icon
+
+    # Color Palette logic
+    if style == "inverted":
+        card_fill = T.BLACK if is_on else T.WHITE
+        card_outline = T.BLACK if is_on else T.GRAY_BORDER
+        text_color = T.WHITE if is_on else T.BLACK
+        sub_color = T.GRAY_SURFACE if is_on else T.GRAY_MUTED
+        well_fill = T.WHITE if is_on else T.GRAY_SURFACE
+        well_outline = None if is_on else T.GRAY_BORDER
+        icon_color = T.BLACK if is_on else T.GRAY_MID
+    else:
+        # Standard Apple Home Style
+        card_fill = T.GRAY_SURFACE if is_pressed else T.WHITE
+        card_outline = T.BLACK if is_on else T.GRAY_BORDER
+        text_color = T.BLACK
+        sub_color = T.GRAY_DARK if is_on else T.GRAY_MUTED
+        if is_on:
+            well_fill = T.BLACK
+            well_outline = None
+            icon_color = T.WHITE
+        else:
+            well_fill = T.WHITE
+            well_outline = T.GRAY_BORDER
+            icon_color = T.GRAY_MID
+
+    # Draw Outer Squircle Card
+    T.draw_card(draw, (x, y, x + w, y + h), radius=radius, fill=card_fill, outline=card_outline, shadow=not is_pressed)
+
+    # Active Indicator Pill (top-right)
+    if is_on and style != "inverted":
+        dot_r = 4
+        dot_x = x + w - 20
+        dot_y = y + 20
+        draw.ellipse([(dot_x - dot_r, dot_y - dot_r), (dot_x + dot_r, dot_y + dot_r)], fill=T.BLACK)
+
+    # Optional Custom Badge
+    badge_txt = el.get("badge")
+    if badge_txt:
+        f_b = T.font(11, bold=True)
+        bw = T.text_width(badge_txt, f_b) + 12
+        bx1 = x + w - 16
+        bx0 = bx1 - bw
+        T.draw_concentric_badge(draw, radius, 8, (bx0, y + 14, bx1, y + 32), fill=T.GRAY_SURFACE, text=badge_txt, font=f_b, text_color=T.BLACK)
+
+    # Geometry Layout
+    is_wide = w >= int(h * 1.25)
+    if is_wide:
+        # Horizontal Layout: Icon on the left, 2-line text on the right
+        well_r = max(18, min(28, int(h * 0.22)))
+        well_cx = x + 18 + well_r
+        well_cy = y + h // 2
+
+        # Draw Icon Well
+        if well_fill or well_outline:
+            draw.ellipse(
+                [(well_cx - well_r, well_cy - well_r), (well_cx + well_r, well_cy + well_r)],
+                fill=well_fill,
+                outline=well_outline,
+                width=1,
+            )
+        # Draw Icon Glyph inside Well
+        isz = max(18, min(36, int(well_r * 1.25)))
+        _draw_icon_glyph(draw, icon_name, well_cx, well_cy, isz, color=icon_color)
+
+        # Typographic Stack
+        text_x = well_cx + well_r + 16
+        avail_w = max(40, (x + w - 24) - text_x)
+
+        title_sz = max(14, min(24, int(h * 0.18)))
+        sub_sz = max(11, min(17, int(title_sz * 0.75)))
+
+        f_title = T.best_font_for_text(title, size=title_sz, bold=True)
+        f_sub = T.best_font_for_text(subtitle, size=sub_sz, bold=False)
+
+        fitted_title = _fit_text(title, avail_w, f_title)
+        fitted_sub = _fit_text(subtitle, avail_w, f_sub)
+
+        # Align vertically
+        draw.text((text_x, well_cy - int(title_sz * 0.58)), fitted_title, font=f_title, fill=text_color, anchor="lm")
+        draw.text((text_x, well_cy + int(sub_sz * 0.72)), fitted_sub, font=f_sub, fill=sub_color, anchor="lm")
+    else:
+        # Square / Compact Tile Layout (Icon Top-Left, Text Bottom)
+        well_r = max(18, min(26, int(w * 0.15)))
+        well_cx = x + 18 + well_r
+        well_cy = y + 18 + well_r
+
+        if well_fill or well_outline:
+            draw.ellipse(
+                [(well_cx - well_r, well_cy - well_r), (well_cx + well_r, well_cy + well_r)],
+                fill=well_fill,
+                outline=well_outline,
+                width=1,
+            )
+        isz = max(18, min(32, int(well_r * 1.25)))
+        _draw_icon_glyph(draw, icon_name, well_cx, well_cy, isz, color=icon_color)
+
+        avail_w = w - 36
+        title_sz = max(13, min(20, int(w * 0.11)))
+        sub_sz = max(11, min(15, int(title_sz * 0.78)))
+
+        f_title = T.best_font_for_text(title, size=title_sz, bold=True)
+        f_sub = T.best_font_for_text(subtitle, size=sub_sz, bold=False)
+
+        fitted_title = _fit_text(title, avail_w, f_title)
+        fitted_sub = _fit_text(subtitle, avail_w, f_sub)
+
+        draw.text((x + 18, y + h - int(sub_sz * 2.2) - 10), fitted_title, font=f_title, fill=text_color, anchor="lm")
+        draw.text((x + 18, y + h - int(sub_sz * 0.8) - 10), fitted_sub, font=f_sub, fill=sub_color, anchor="lm")
 
 
 
@@ -661,6 +856,13 @@ DRAWERS = {
     "dynamic_grid": _draw_dynamic_grid,
     "button": _draw_button,
     "card": _draw_button,
+    "tile": _draw_tile,
+    "light_tile": _draw_tile,
+    "switch_tile": _draw_tile,
+    "sensor_tile": _draw_tile,
+    "climate_tile": _draw_tile,
+    "media_tile": _draw_tile,
+    "action_tile": _draw_tile,
     "calendar_timeline": _draw_calendar_timeline,
     "weather_forecast": _draw_weather_forecast,
 }
@@ -830,16 +1032,17 @@ def hit_test(page, x, y, *, display=None, orientation=0, edge_nav_ratio=0.15):
                             "handled": True,
                         }
 
-        # Standard element / button / card hit
+        # Standard element / button / card / tile hit
         touch_cfg = el.get("touch") or {}
         action = touch_cfg.get("action") or el.get("action")
         ent = touch_cfg.get("entity") or el.get("entity")
 
-        # Default action for elements with entities is "toggle"
+        # Default action for tile or elements with entities is "toggle"
         if not action and ent:
             action = "toggle"
 
-        if action or ent or touch_cfg.get("service") or touch_cfg.get("target_page"):
+        is_tile = el_type in ("tile", "light_tile", "switch_tile", "sensor_tile", "climate_tile", "media_tile", "action_tile")
+        if is_tile or action or ent or touch_cfg.get("service") or touch_cfg.get("target_page"):
             return {
                 "type": "element_action",
                 "element_index": i,
@@ -859,11 +1062,27 @@ def collect_templates(page):
     """Every templated string on a page, as {element_index: template}."""
     out = {}
     for i, el in enumerate(page.get("elements", [])):
-        if el.get("type") in ("text", "number", "button", "card"):
+        el_type = el.get("type", "")
+        if el_type in ("text", "number", "button", "card"):
             tpl = template_for(el)
             if tpl and "{{" in tpl:
                 out[i] = tpl
-        elif el.get("type") == "dynamic_grid":
+        elif el_type in ("tile", "light_tile", "switch_tile", "sensor_tile", "climate_tile", "media_tile", "action_tile"):
+            ent = (el.get("entity") or "").strip()
+            if ent:
+                sub_tpl = el.get("subtitle")
+                if sub_tpl and "{{" in str(sub_tpl):
+                    out[i] = str(sub_tpl)
+                else:
+                    out[i] = (
+                        "{{ {"
+                        f"'state': states('{binding._quote(ent)}'), "
+                        f"'name': (state_attr('{binding._quote(ent)}', 'friendly_name') or ''), "
+                        f"'brightness': state_attr('{binding._quote(ent)}', 'brightness'), "
+                        f"'unit': (state_attr('{binding._quote(ent)}', 'unit_of_measurement') or '')"
+                        "} | to_json }}"
+                    )
+        elif el_type == "dynamic_grid":
             items = el.get("items", [])
             ents = [it.get("entity", "").strip() for it in items if isinstance(it, dict) and it.get("entity", "").strip()]
             if ents:
