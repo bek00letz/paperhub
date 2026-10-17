@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.2.0 - Apple Home Control Tiles, Smart Drag-and-Drop, and Live Touch Simulation
+
+- **First-Class Apple Home Control Tiles (`tile`)**:
+  - Replaced primitive text-only states with high-DPI squircle cards adhering to the Apple Craftsmanship Standard ($R_{\text{outer}} = 22\text{--}24\text{px}$, circular icon well $R_{\text{inner}} = 22\text{px}$).
+  - True 16-level Carta grayscale anti-aliasing with delicate hairline borders and ambient soft drop-shadows.
+  - Full state-aware dynamic styling:
+    - **ON**: Inverted solid black circular well with crisp white MDI glyph, bold primary title, dynamic status subtitle (`On • 80%`), and active accent pill indicator.
+    - **OFF**: Crisp off-white card surface, outline circular well with muted dark-gray glyph, and secondary `Off` label.
+    - Supports both **Standard** (light card + inverted well) and **Inverted** (deep solid black card) aesthetic styles.
+  - Built-in domain specialized variants: `light_tile`, `switch_tile`, `climate_tile`, `sensor_tile`, `action_tile`.
+  - Automatic $\ge 44\text{pt}$ touch targets for comfortable physical tapping on capacitive e-reader screens.
+- **Smart Drag-and-Drop & Entity Explorer**:
+  - Dragging or adding entities onto the canvas now automatically provisions fully configured Apple Home Tiles.
+  - Intelligent domain heuristics: auto-suggests primary titles from friendly names, pairs active and off outline icons (e.g. `mdi:lightbulb` $\to$ `mdi:lightbulb-outline`), and sets appropriate touch actions (`toggle` for lights/switches, `turn_on` for scenes/scripts, `none` for sensors).
+  - Dragging calendar entities automatically provisions the Calendar Timeline widget; dragging weather entities provisions the 5-day Weather Forecast widget.
+- **Live In-Memory Touch Simulation (Zero Coordinate Drift)**:
+  - Fixed touch simulation disconnect where the simulator was hit-testing stale disk layouts.
+  - The editor now transmits live in-memory screen structures (`page: page()`) directly to `POST /api/touch`, enabling instant testing of newly added or moved elements before saving to disk.
+  - Tapping in simulation mode directly triggers live Home Assistant service calls (`homeassistant.toggle`) and re-renders the canvas preview in ~20ms.
+- **Visual Editor Inspector & Quick-Add Palette**:
+  - Added dedicated Tile Configuration inspector with live fields for Title, Entity, Subtitle (with custom Jinja template support), Active Icon, Off Icon, Card Style, Radius, and Top-Right Badge.
+  - Integrated visual MDI icon picker buttons directly into the tile inspector for active and off glyphs.
+  - Added quick-add palette buttons for Light Tile, Switch Tile, Climate, Sensor, and Action.
+- **Ambient Home Screen Preset Redesign**:
+  - Completely refreshed default `"home"` layout in `default_layouts.json`:
+    - Large typographic room header and date.
+    - Balanced 2-column grid of 6 Apple Control Tiles: Ceiling Light, Reading Lamp, Ceiling Fan, Thermostat, Sonos Speaker, and Evening Relax Scene.
+    - 5-Day Weather Outlook and Calendar Schedule Timeline widgets.
+    - Subtle edge-tap pagination guide.
+  - Full 1072 × 1448 frame rasterization completes in **34ms**.
+- **Automated Test Suite**:
+  - Added unit tests for Apple Home tile rasterization (standard and inverted styles), automatic tile hit-testing, and live-page touch simulation. All 11 tests passing.
+
 ## 1.1.0 - TRMNL Support, Calendar & Weather Widgets, Conditional ETag Caching
 
 - **TRMNL Hardware & Zero-RAM Direct BMP Streaming**:
