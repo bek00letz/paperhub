@@ -1,0 +1,605 @@
+"""Data-driven page rendering and server-side hit-testing for PaperHub.
+
+Every element carries its own box (x, y, w, h) in canvas pixels.
+Supports 16-level grayscale anti-aliasing, concentric geometry, and
+millisecond-fast server-side 2D hit-testing for touch interactions.
+"""
+import json
+import math
+from functools import lru_cache
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
+
+from . import theme as T
+from . import binding
+from .binding import template_for
+
+_FONTS = Path(__file__).parent.parent / "fonts"
+_MDI_TTF = _FONTS / "mdi.ttf"
+_MDI_MAP = _FONTS / "mdi-codepoints.json"
+
+_mdi_codepoints = None
+
+
+def mm_per_px(display=None):
+    disp = T.get_display(display)
+    return disp["mm_w"] / disp["w"]
+
+
+@lru_cache(maxsize=256)
+def _mdi_font(size: int):
+    clamped = max(8, min(480, int(size)))
+    return ImageFont.truetype(str(_MDI_TTF), clamped)
+
+
+def mdi_codepoint(name):
+    """Map 'mdi:washing-machine' (or bare 'washing-machine') to a codepoint."""
+    global _mdi_codepoints
+    if _mdi_codepoints is None:
+        try:
+            _mdi_codepoints = json.loads(_MDI_MAP.read_text())
+        except Exception:
+            _mdi_codepoints = {}
+    return _mdi_codepoints.get(str(name).removeprefix("mdi:"))
+
+
+def draw_cat(draw, x=0, y=0, height=200):
+    """Sitting cat in profile, facing right, traced at a nominal 200px tall."""
+    dx = x - 96
+    dy = y
+    scale = max(0.1, min(4.0, height / 200.0))
+
+    def P(pts):
+        return [(dx + px * scale, dy + py * scale) for px, py in pts]
+
+    draw.polygon(P([(124, 96), (112, 130), (106, 170), (104, 202),
+                    (176, 202), (206, 198), (222, 176), (224, 146),
+                    (210, 116), (188, 96)]), fill=T.BLACK)
+    draw.ellipse(P([(114, 24), (198, 108)]), fill=T.BLACK)          # head
+    draw.polygon(P([(122, 44), (112, 4), (152, 30)]), fill=T.BLACK)  # left ear
+    draw.polygon(P([(160, 30), (200, 4), (190, 44)]), fill=T.BLACK)  # right ear
+    draw.line(P([(202, 196), (248, 188), (268, 166), (272, 136),
+                 (262, 112), (246, 102)]),
+              fill=T.BLACK, width=max(3, int(14 * scale)), joint="curve")
+
+
+CUSTOM_ICONS = {
+    "cat-sitting": draw_cat,
+}
+
+
+def _fit_glyph(ch, box_w, box_h, start=240):
+    """Largest font size at which the glyph's ink fits the box."""
+    lo, hi, best = 8, max(8, min(480, int(start))), 8
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        f = _mdi_font(mid)
+        l, t, r, b = f.getbbox(ch)
+        if (r - l) <= box_w and (b - t) <= box_h:
+            best, lo = mid, mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
+def _anchor_x(align, x, w):
+    return {"left": x, "center": x + w // 2, "right": x + w}.get(align, x)
+
+
+def _clamp_box(el, default_w=200, default_h=60, display=None):
+    cw, ch = T.canvas_dims(0, display)
+    x = max(0, min(cw - 1, int(el.get("x", 0))))
+    y = max(0, min(ch - 1, int(el.get("y", 0))))
+    w = max(1, min(cw - x, int(el.get("w", default_w))))
+    h = max(1, min(ch - y, int(el.get("h", default_h))))
+    return x, y, w, h
+
+
+def _draw_icon_glyph(draw, name, cx, cy, size, color=T.BLACK):
+    """Draw an MDI icon or custom vector icon centered at (cx, cy)."""
+    if not name:
+        return
+    s = str(name).strip()
+    if s in CUSTOM_ICONS:
+        CUSTOM_ICONS[s](draw, cx - size // 2, cy - size // 2, height=size)
+        return
+    cp = mdi_codepoint(s)
+    if not cp:
+        return
+    ch = chr(int(cp, 16))
+    f = _mdi_font(size)
+    l, t, r, b = f.getbbox(ch)
+    draw.text((cx - (r + l) // 2, cy - (b + t) // 2), ch, font=f, fill=color)
+
+
+def _fit_text(text, max_w, f):
+    """Truncate text with ellipsis if exceeding max width."""
+    s = str(text or "")
+    if T.text_width(s, f) <= max_w:
+        return s
+    ell = "…"
+    while s and T.text_width(s + ell, f) > max_w:
+        s = s[:-1]
+    return s + ell if s else ""
+
+
+def _draw_text(img, draw, el, val, metrics=None, *, distance_m=3.0, display=None):
+    x, y, w, h = _clamp_box(el, default_w=300, default_h=100, display=display)
+    val = str(val or "")
+    align = el.get("align", "left")
+    bold = bool(el.get("bold", True))
+    family = el.get("family", "lato")
+    color = T.BLACK if el.get("color") != "muted" else T.GRAY_MUTED
+
+    # Support card background styling
+    if el.get("card"):
+        T.draw_card(draw, [(x, y), (x + w, y + h)], radius=el.get("radius", 18), shadow=el.get("shadow", True))
+        # Inset text inside padding
+        pad = el.get("padding", 16)
+        x += pad
+        y += pad
+        w -= pad * 2
+        h -= pad * 2
+
+    size = el.get("size")
+    if not size:
+        size = T.fit_size(val, w, h, start=min(h, 240), floor=12, bold=bold, family=family)
+    f = T.font(size, bold=bold, family=family)
+
+    tx = _anchor_x(align, x, w)
+    anchor_mode = {"left": "lt", "center": "mt", "right": "rt"}.get(align, "lt")
+    draw.text((tx, y + (h - size) // 2), val, font=f, fill=color, anchor=anchor_mode)
+
+
+def _draw_icon(img, draw, el, val="", display=None):
+    x, y, w, h = _clamp_box(el, default_w=120, default_h=120, display=display)
+    name = el.get("icon") or val
+    if not name:
+        return
+    color = T.BLACK if el.get("color") != "muted" else T.GRAY_MUTED
+    sz = min(w, h)
+    _draw_icon_glyph(draw, name, x + w // 2, y + h // 2, sz, color=color)
+
+
+def _draw_line(img, draw, el, val="", display=None):
+    x, y, w, h = _clamp_box(el, default_w=200, default_h=4, display=display)
+    color = T.GRAY_BORDER if el.get("subtle", True) else T.BLACK
+    thickness = max(1, int(el.get("thickness", 1)))
+    draw.rectangle([(x, y), (x + w, y + max(1, thickness))], fill=color)
+
+
+def _draw_curve(img, draw, el, val="", series=None, display=None):
+    x, y, w, h = _clamp_box(el, default_w=300, default_h=120, display=display)
+    if not series or len(series) < 2:
+        return
+    pts = []
+    min_v, max_v = min(series), max(series)
+    span = max(1e-5, max_v - min_v)
+    step = w / max(1, len(series) - 1)
+    for i, v in enumerate(series):
+        px = x + i * step
+        py = y + h - ((v - min_v) / span) * h
+        pts.append((px, py))
+    draw.line(pts, fill=T.BLACK, width=max(2, int(el.get("width", 2))), joint="curve")
+
+
+def compute_dynamic_grid_boxes(x, y, w, h, n, cols, rows, gap=16):
+    """Compute (cx0, cy0, cw, ch) bounding boxes for n items in cols x rows grid."""
+    if n <= 0:
+        return []
+    total_hgap = (cols - 1) * gap
+    total_vgap = (rows - 1) * gap
+    cw = max(20, (w - total_hgap) // max(1, cols))
+    ch = max(20, (h - total_vgap) // max(1, rows))
+
+    boxes = []
+    for i in range(n):
+        r = i // cols
+        c = i % cols
+        bx0 = x + c * (cw + gap)
+        by0 = y + r * (ch + gap)
+        boxes.append((bx0, by0, cw, ch))
+    return boxes
+
+
+def _compute_grid_dimensions(n, is_wide):
+    """Determine optimal (cols, rows) for n items."""
+    if n <= 1:
+        return 1, 1
+    if n == 2:
+        return (2, 1) if is_wide else (1, 2)
+    if n == 3:
+        return (3, 1) if is_wide else (1, 3)
+    if n == 4:
+        return 2, 2
+    if n <= 6:
+        return (3, 2) if is_wide else (2, 3)
+    if n <= 8:
+        return (4, 2) if is_wide else (2, 4)
+    # n > 8
+    if is_wide:
+        rows = 3
+        cols = math.ceil(n / rows)
+        return cols, rows
+    cols = 2
+    rows = math.ceil(n / cols)
+    return cols, rows
+
+
+def _draw_dynamic_grid(img, draw, el, vals=None, display=None):
+    """Render responsive 2D matrix of interactive entity cards."""
+    x, y, w, h = _clamp_box(el, default_w=600, default_h=400, display=display)
+    raw_items = el.get("items", [])
+    if isinstance(vals, str):
+        try:
+            parsed = json.loads(vals)
+            if isinstance(parsed, list):
+                items = parsed
+            else:
+                items = raw_items
+        except Exception:
+            items = raw_items
+    elif isinstance(vals, list):
+        items = vals
+    else:
+        items = raw_items
+
+    # Filter active items
+    active_items = []
+    for it in items:
+        if isinstance(it, dict):
+            active_items.append(it)
+        elif isinstance(it, str):
+            active_items.append({"entity": it, "name": it.split(".")[-1].replace("_", " ").title(), "state": "on"})
+
+    n = len(active_items)
+    if n == 0:
+        return
+
+    is_wide = w >= h
+    cols, rows = _compute_grid_dimensions(n, is_wide)
+    gap = int(el.get("gap", 16 if w >= 800 else 12))
+    boxes = compute_dynamic_grid_boxes(x, y, w, h, n, cols, rows, gap=gap)
+
+    card_radius = int(el.get("radius", 20 if w >= 800 else 14))
+
+    for it, (cx0, cy0, cw_i, ch_i) in zip(active_items, boxes):
+        cx1, cy1 = cx0 + cw_i, cy0 + ch_i
+        raw_state = str(it.get("state") or "off").lower()
+        is_active = raw_state in ("on", "open", "active", "playing", "home", "unlocked", "heat", "cool", "auto")
+
+        # Card container with concentric geometry and soft depth
+        card_fill = T.WHITE
+        border_color = T.BLACK if is_active else T.GRAY_BORDER
+        border_w = 2 if is_active else 1
+
+        T.draw_card(
+            draw,
+            [(cx0, cy0), (cx1, cy1)],
+            radius=card_radius,
+            fill=card_fill,
+            outline=border_color,
+            width=border_w,
+            shadow=True,
+        )
+
+        # State Badge (concentric: R_inner = R_card - padding)
+        badge_pad = 10
+        badge_h = max(24, int(ch_i * 0.18))
+        badge_f = T.font(max(11, int(badge_h * 0.58)), bold=True)
+        st_text = str(it.get("state") or "ON").upper()
+        if len(st_text) > 8:
+            st_text = st_text[:8]
+        bw = max(42, T.text_width(st_text, badge_f) + 16)
+        bx0 = cx1 - bw - badge_pad
+        by0 = cy0 + badge_pad
+
+        badge_fill = T.BLACK if is_active else T.GRAY_SURFACE
+        badge_txt_color = T.WHITE if is_active else T.GRAY_DARK
+        T.draw_concentric_badge(
+            draw,
+            parent_radius=card_radius,
+            padding=badge_pad,
+            box=[bx0, by0, bx0 + bw, by0 + badge_h],
+            fill=badge_fill,
+            text=st_text,
+            font=badge_f,
+            text_color=badge_txt_color,
+        )
+
+        # Icon and Labels layout
+        icon_name = it.get("icon") or "mdi:power"
+        icon_color = T.BLACK if is_active else T.GRAY_MUTED
+
+        if cw_i >= ch_i * 1.3:
+            # Horizontal (wide) card layout
+            isz = max(32, min(72, int(ch_i * 0.45)))
+            icon_cx = cx0 + 20 + isz // 2
+            icon_cy = cy0 + ch_i // 2
+            _draw_icon_glyph(draw, icon_name, icon_cx, icon_cy, isz, color=icon_color)
+
+            # Name and secondary text
+            text_x = icon_cx + isz // 2 + 16
+            avail_w = max(40, bx0 - text_x - 12)
+            name_sz = max(14, min(24, int(ch_i * 0.22)))
+            f_name = T.font(name_sz, bold=True)
+            name_txt = _fit_text(it.get("name", ""), avail_w, f_name)
+
+            sec_txt = it.get("changed") or it.get("secondary", "")
+            if sec_txt:
+                draw.text((text_x, cy0 + ch_i // 2 - int(name_sz * 0.6)), name_txt, font=f_name, fill=T.BLACK, anchor="lm")
+                f_sec = T.font(max(10, int(name_sz * 0.75)), bold=False)
+                sec_fitted = _fit_text(sec_txt, avail_w, f_sec)
+                draw.text((text_x, cy0 + ch_i // 2 + int(name_sz * 0.7)), sec_fitted, font=f_sec, fill=T.GRAY_MUTED, anchor="lm")
+            else:
+                draw.text((text_x, cy0 + ch_i // 2), name_txt, font=f_name, fill=T.BLACK, anchor="lm")
+        else:
+            # Vertical (square/tall) card layout
+            mid_x = cx0 + cw_i // 2
+            isz = max(36, min(80, int(cw_i * 0.35)))
+            icon_cy = cy0 + int(ch_i * 0.38)
+            _draw_icon_glyph(draw, icon_name, mid_x, icon_cy, isz, color=icon_color)
+
+            name_sz = max(13, min(22, int(cw_i * 0.12)))
+            f_name = T.font(name_sz, bold=True)
+            name_txt = _fit_text(it.get("name", ""), cw_i - 24, f_name)
+            draw.text((mid_x, cy0 + int(ch_i * 0.72)), name_txt, font=f_name, fill=T.BLACK, anchor="mm")
+
+            sec_txt = it.get("changed") or it.get("secondary", "")
+            if sec_txt:
+                f_sec = T.font(max(10, int(name_sz * 0.75)), bold=False)
+                sec_fitted = _fit_text(sec_txt, cw_i - 24, f_sec)
+                draw.text((mid_x, cy0 + int(ch_i * 0.86)), sec_fitted, font=f_sec, fill=T.GRAY_MUTED, anchor="mm")
+
+
+def _draw_button(img, draw, el, val="", display=None):
+    """Draw a dedicated interactive touch button."""
+    x, y, w, h = _clamp_box(el, default_w=200, default_h=80, display=display)
+    radius = int(el.get("radius", 18))
+    is_pressed = bool(el.get("pressed", False))
+    fill = T.GRAY_SURFACE if is_pressed else T.WHITE
+    outline = T.BLACK if is_pressed else T.GRAY_BORDER
+
+    T.draw_card(draw, [(x, y), (x + w, y + h)], radius=radius, fill=fill, outline=outline, shadow=not is_pressed)
+
+    icon = el.get("icon")
+    label = str(el.get("label") or val or "")
+    color = T.BLACK
+
+    if icon and label:
+        isz = min(40, h - 20)
+        _draw_icon_glyph(draw, icon, x + 24 + isz // 2, y + h // 2, isz, color=color)
+        f = T.font(max(14, int(h * 0.28)), bold=True)
+        draw.text((x + 36 + isz, y + h // 2), label, font=f, fill=color, anchor="lm")
+    elif icon:
+        _draw_icon_glyph(draw, icon, x + w // 2, y + h // 2, min(w - 20, h - 20), color=color)
+    elif label:
+        f = T.font(max(14, int(h * 0.3)), bold=True)
+        draw.text((x + w // 2, y + h // 2), label, font=f, fill=color, anchor="mm")
+
+
+DRAWERS = {
+    "text": _draw_text,
+    "number": _draw_text,
+    "icon": _draw_icon,
+    "line": _draw_line,
+    "curve": _draw_curve,
+    "dynamic_grid": _draw_dynamic_grid,
+    "button": _draw_button,
+    "card": _draw_button,
+}
+
+
+def _fmt_number(val, el):
+    if val is None or val == "":
+        return "--"
+    try:
+        fval = float(str(val).strip())
+    except (TypeError, ValueError):
+        return str(val)
+    dec = el.get("decimals", 0)
+    try:
+        idec = int(dec)
+    except (TypeError, ValueError):
+        idec = 0
+    if idec <= 0:
+        s = f"{fval:.0f}"
+    else:
+        s = f"{fval:.{idec}f}"
+    unit = el.get("unit", "")
+    prefix = el.get("prefix", "")
+    suffix = el.get("suffix", "")
+    return f"{prefix}{s}{unit}{suffix}"
+
+
+def element_text(el, vals, idx):
+    """The string an element should display, after template resolution."""
+    if el.get("type") == "number":
+        return _fmt_number(vals.get(idx, el.get("value", "")), el)
+    if el.get("type") in ("text", "button", "card"):
+        got = vals.get(idx)
+        base = str(got) if got is not None else str(el.get("value", "") or el.get("label", "") or "")
+        prefix = el.get("prefix", "")
+        suffix = el.get("suffix", "")
+        if prefix or suffix:
+            return f"{prefix}{base}{suffix}"
+        return base
+    return ""
+
+
+def render_page(
+    page,
+    vals,
+    *,
+    clock="",
+    label="",
+    battery_pct=None,
+    page_info=None,
+    series=None,
+    metrics=None,
+    orientation=0,
+    distance_m=3.0,
+    display=None,
+    grayscale=True,
+):
+    """Draw a complete page onto a high-DPI 16-level grayscale bitmap canvas."""
+    img, d = T.new_canvas(orientation=orientation, display=display)
+    elements = page.get("elements", [])
+
+    for i, el in enumerate(elements):
+        drawer = DRAWERS.get(el.get("type"))
+        if drawer is None:
+            continue
+        try:
+            if el["type"] == "curve":
+                drawer(img, d, el, "", (series or {}).get(i), display=display)
+            elif el["type"] in ("text", "number"):
+                got = []
+                drawer(img, d, el, element_text(el, vals, i), got, distance_m=distance_m, display=display)
+                if metrics is not None and got:
+                    entry = {"i": i, **got[0]}
+                    metrics.append(entry)
+            elif el["type"] == "dynamic_grid":
+                drawer(img, d, el, vals.get(i), display=display)
+            else:
+                drawer(img, d, el, element_text(el, vals, i), display=display)
+        except Exception:
+            # One bad element must never crash the page
+            continue
+
+    # Ambient footer with time, page dots, battery
+    T.footer(
+        d,
+        clock=clock,
+        label=label,
+        battery_pct=battery_pct,
+        page_info=page_info,
+        orientation=orientation,
+        display=display,
+    )
+
+    # Carta 16-level quantization
+    if grayscale:
+        return T.to_16grayscale(img)
+    return img
+
+
+def hit_test(page, x, y, *, display=None, orientation=0, edge_nav_ratio=0.15):
+    """2D Server-Side Hit-Testing for touch events.
+
+    Returns:
+        Dict describing hit action:
+        - {"type": "nav_prev", "edge": "left", "handled": True}
+        - {"type": "nav_next", "edge": "right", "handled": True}
+        - {"type": "element_action", "element_index": ..., "action": ..., "entity": ..., ...}
+        - {"type": "miss", "handled": False}
+    """
+    cw, ch = T.canvas_dims(orientation, display)
+    x = max(0, min(cw, int(x)))
+    y = max(0, min(ch, int(y)))
+
+    # 1. Edge Tap Navigation ("Book Metaphor")
+    if edge_nav_ratio and edge_nav_ratio > 0:
+        edge_w = int(cw * float(edge_nav_ratio))
+        if x <= edge_w:
+            return {
+                "type": "nav_prev",
+                "edge": "left",
+                "handled": True,
+                "x": x,
+                "y": y,
+            }
+        if x >= cw - edge_w:
+            return {
+                "type": "nav_next",
+                "edge": "right",
+                "handled": True,
+                "x": x,
+                "y": y,
+            }
+
+    # 2. Center Zone Element Hit-Testing (top layers first)
+    elements = page.get("elements", [])
+    for i in reversed(range(len(elements))):
+        el = elements[i]
+        ex, ey, ew, eh = _clamp_box(el, display=display)
+        if not (ex <= x <= ex + ew and ey <= y <= ey + eh):
+            continue
+
+        el_type = el.get("type", "")
+
+        # Dynamic Grid child hit-testing
+        if el_type == "dynamic_grid":
+            items = el.get("items", [])
+            n = len(items)
+            if n > 0:
+                is_wide = ew >= eh
+                cols, rows = _compute_grid_dimensions(n, is_wide)
+                gap = int(el.get("gap", 16 if ew >= 800 else 12))
+                boxes = compute_dynamic_grid_boxes(ex, ey, ew, eh, n, cols, rows, gap=gap)
+                for k, (bx0, by0, bw, bh) in enumerate(boxes):
+                    if bx0 <= x <= bx0 + bw and by0 <= y <= by0 + bh:
+                        item = items[k] if isinstance(items[k], dict) else {"entity": str(items[k])}
+                        ent = item.get("entity", "")
+                        return {
+                            "type": "element_action",
+                            "element_index": i,
+                            "element_type": "dynamic_grid",
+                            "item_index": k,
+                            "entity": ent,
+                            "action": item.get("action", "toggle"),
+                            "service": item.get("service"),
+                            "data": item.get("data"),
+                            "target_page": item.get("target_page"),
+                            "handled": True,
+                        }
+
+        # Standard element / button / card hit
+        touch_cfg = el.get("touch") or {}
+        action = touch_cfg.get("action") or el.get("action")
+        ent = touch_cfg.get("entity") or el.get("entity")
+
+        # Default action for elements with entities is "toggle"
+        if not action and ent:
+            action = "toggle"
+
+        if action or ent or touch_cfg.get("service") or touch_cfg.get("target_page"):
+            return {
+                "type": "element_action",
+                "element_index": i,
+                "element_type": el_type,
+                "entity": ent,
+                "action": action or "toggle",
+                "service": touch_cfg.get("service") or el.get("service"),
+                "data": touch_cfg.get("data") or el.get("data"),
+                "target_page": touch_cfg.get("target_page") or el.get("target_page"),
+                "handled": True,
+            }
+
+    return {"type": "miss", "handled": False, "x": x, "y": y}
+
+
+def collect_templates(page):
+    """Every templated string on a page, as {element_index: template}."""
+    out = {}
+    for i, el in enumerate(page.get("elements", [])):
+        if el.get("type") in ("text", "number", "button", "card"):
+            tpl = template_for(el)
+            if tpl and "{{" in tpl:
+                out[i] = tpl
+        elif el.get("type") == "dynamic_grid":
+            items = el.get("items", [])
+            ents = [it.get("entity", "").strip() for it in items if isinstance(it, dict) and it.get("entity", "").strip()]
+            if ents:
+                ents_quoted = ", ".join(f"'{binding._quote(e)}'" for e in ents)
+                tpl = (
+                    "[{% for e in [" + ents_quoted + "] %}"
+                    '{"entity": {{ e | to_json }}, '
+                    '"state": {{ states(e) | to_json }}, '
+                    '"name": {{ (state_attr(e, "friendly_name") or "") | to_json }}, '
+                    '"changed": {{ (relative_time(states[e].last_changed) if (states[e] is defined and states[e] is not none and states[e].last_changed is defined) else "") | to_json }}}'
+                    "{% if not loop.last %},{% endif %}{% endfor %}]"
+                )
+                out[i] = tpl
+    return out

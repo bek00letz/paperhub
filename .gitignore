@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Temporary data
+/data/
+*.tmp
+*.log
+.DS_Store
+
+# Test outputs
+out/
+tmp/

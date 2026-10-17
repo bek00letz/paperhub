@@ -1,0 +1,370 @@
+{
+  "display": "boox_go_6",
+  "orientation": 0,
+  "rotation_speed": 0,
+  "edge_nav": true,
+  "edge_nav_ratio": 0.15,
+  "pages": {
+    "home": {
+      "name": "Ambient Home",
+      "elements": [
+        {
+          "type": "text",
+          "x": 64,
+          "y": 64,
+          "w": 600,
+          "h": 72,
+          "value": "Living Room",
+          "size": 48,
+          "bold": true,
+          "family": "lato"
+        },
+        {
+          "type": "text",
+          "x": 64,
+          "y": 140,
+          "w": 500,
+          "h": 40,
+          "value": "{{ now().strftime('%A, %-d %B') }}",
+          "size": 24,
+          "bold": false,
+          "color": "muted",
+          "family": "lato"
+        },
+        {
+          "type": "icon",
+          "x": 920,
+          "y": 64,
+          "w": 80,
+          "h": 80,
+          "icon": "mdi:home-variant-outline"
+        },
+        {
+          "type": "card",
+          "x": 64,
+          "y": 210,
+          "w": 944,
+          "h": 190,
+          "radius": 24,
+          "shadow": true,
+          "action": "navigate_page",
+          "target_page": "climate",
+          "icon": "mdi:thermostat",
+          "label": "21.5°C  •  Living Room Comfort",
+          "touch": {
+            "action": "navigate_page",
+            "target_page": "climate"
+          }
+        },
+        {
+          "type": "dynamic_grid",
+          "x": 64,
+          "y": 430,
+          "w": 944,
+          "h": 500,
+          "radius": 20,
+          "gap": 16,
+          "items": [
+            {
+              "entity": "light.living_room_ceiling",
+              "name": "Ceiling Light",
+              "icon": "mdi:ceiling-light",
+              "state": "on",
+              "action": "toggle"
+            },
+            {
+              "entity": "light.reading_lamp",
+              "name": "Reading Lamp",
+              "icon": "mdi:lamp",
+              "state": "off",
+              "action": "toggle"
+            },
+            {
+              "entity": "switch.living_room_fan",
+              "name": "Ceiling Fan",
+              "icon": "mdi:fan",
+              "state": "on",
+              "action": "toggle"
+            },
+            {
+              "entity": "media_player.living_room_speaker",
+              "name": "Media Player",
+              "icon": "mdi:speaker",
+              "state": "playing",
+              "action": "navigate_page",
+              "target_page": "scenes"
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "x": 64,
+          "y": 960,
+          "w": 944,
+          "h": 180,
+          "radius": 24,
+          "shadow": true,
+          "action": "toggle",
+          "entity": "media_player.living_room_speaker",
+          "icon": "mdi:play-circle-outline",
+          "label": "Now Playing: Amber Ambient • Tycho",
+          "touch": {
+            "action": "call_service",
+            "service": "media_player.media_play_pause",
+            "entity": "media_player.living_room_speaker"
+          }
+        },
+        {
+          "type": "text",
+          "x": 64,
+          "y": 1180,
+          "w": 944,
+          "h": 80,
+          "value": "Tap left/right edge or swipe to navigate pages",
+          "size": 20,
+          "bold": false,
+          "color": "muted",
+          "align": "center",
+          "family": "lato"
+        }
+      ]
+    },
+    "climate": {
+      "name": "Climate & Air",
+      "elements": [
+        {
+          "type": "text",
+          "x": 64,
+          "y": 64,
+          "w": 500,
+          "h": 72,
+          "value": "Climate Control",
+          "size": 48,
+          "bold": true,
+          "family": "lato"
+        },
+        {
+          "type": "button",
+          "x": 860,
+          "y": 64,
+          "w": 148,
+          "h": 64,
+          "radius": 16,
+          "icon": "mdi:arrow-left",
+          "label": "Back",
+          "touch": {
+            "action": "navigate_page",
+            "target_page": "home"
+          }
+        },
+        {
+          "type": "card",
+          "x": 64,
+          "y": 180,
+          "w": 944,
+          "h": 360,
+          "radius": 28,
+          "shadow": true
+        },
+        {
+          "type": "text",
+          "x": 104,
+          "y": 210,
+          "w": 400,
+          "h": 40,
+          "value": "TARGET TEMPERATURE",
+          "size": 18,
+          "bold": true,
+          "color": "muted",
+          "family": "lato"
+        },
+        {
+          "type": "number",
+          "x": 104,
+          "y": 260,
+          "w": 400,
+          "h": 150,
+          "value": "{{ state_attr('climate.living_room', 'temperature') or 21.5 }}",
+          "unit": "°C",
+          "decimals": 1,
+          "size": 96,
+          "bold": true,
+          "family": "lato"
+        },
+        {
+          "type": "button",
+          "x": 620,
+          "y": 240,
+          "w": 140,
+          "h": 110,
+          "radius": 20,
+          "icon": "mdi:plus",
+          "touch": {
+            "action": "call_service",
+            "service": "climate.set_temperature",
+            "entity": "climate.living_room",
+            "data": { "temperature": 22.0 }
+          }
+        },
+        {
+          "type": "button",
+          "x": 800,
+          "y": 240,
+          "w": 140,
+          "h": 110,
+          "radius": 20,
+          "icon": "mdi:minus",
+          "touch": {
+            "action": "call_service",
+            "service": "climate.set_temperature",
+            "entity": "climate.living_room",
+            "data": { "temperature": 21.0 }
+          }
+        },
+        {
+          "type": "text",
+          "x": 104,
+          "y": 440,
+          "w": 800,
+          "h": 40,
+          "value": "Current: 21.8°C  •  Humidity: 46%  •  HVAC: Heating",
+          "size": 22,
+          "bold": false,
+          "family": "lato"
+        },
+        {
+          "type": "dynamic_grid",
+          "x": 64,
+          "y": 580,
+          "w": 944,
+          "h": 360,
+          "radius": 20,
+          "gap": 16,
+          "items": [
+            {
+              "entity": "climate.living_room_heat",
+              "name": "Heat Mode",
+              "icon": "mdi:fire",
+              "state": "on",
+              "action": "call_service",
+              "service": "climate.set_hvac_mode",
+              "data": { "hvac_mode": "heat" }
+            },
+            {
+              "entity": "climate.living_room_cool",
+              "name": "Cool Mode",
+              "icon": "mdi:snowflake",
+              "state": "off",
+              "action": "call_service",
+              "service": "climate.set_hvac_mode",
+              "data": { "hvac_mode": "cool" }
+            },
+            {
+              "entity": "switch.dehumidifier",
+              "name": "Dehumidifier",
+              "icon": "mdi:water-percent",
+              "state": "off",
+              "action": "toggle"
+            },
+            {
+              "entity": "fan.air_purifier",
+              "name": "Air Purifier",
+              "icon": "mdi:air-purifier",
+              "state": "on",
+              "action": "toggle"
+            }
+          ]
+        }
+      ]
+    },
+    "scenes": {
+      "name": "Scenes & Remote",
+      "elements": [
+        {
+          "type": "text",
+          "x": 64,
+          "y": 64,
+          "w": 500,
+          "h": 72,
+          "value": "Quick Scenes",
+          "size": 48,
+          "bold": true,
+          "family": "lato"
+        },
+        {
+          "type": "button",
+          "x": 860,
+          "y": 64,
+          "w": 148,
+          "h": 64,
+          "radius": 16,
+          "icon": "mdi:arrow-left",
+          "label": "Back",
+          "touch": {
+            "action": "navigate_page",
+            "target_page": "home"
+          }
+        },
+        {
+          "type": "dynamic_grid",
+          "x": 64,
+          "y": 180,
+          "w": 944,
+          "h": 900,
+          "radius": 24,
+          "gap": 20,
+          "items": [
+            {
+              "entity": "scene.movie_night",
+              "name": "Cinema Movie",
+              "icon": "mdi:movie-open",
+              "state": "off",
+              "action": "call_service",
+              "service": "scene.turn_on"
+            },
+            {
+              "entity": "scene.relax_evening",
+              "name": "Warm Evening",
+              "icon": "mdi:weather-sunset",
+              "state": "on",
+              "action": "call_service",
+              "service": "scene.turn_on"
+            },
+            {
+              "entity": "scene.goodnight",
+              "name": "Goodnight All",
+              "icon": "mdi:bed-clock",
+              "state": "off",
+              "action": "call_service",
+              "service": "scene.turn_on"
+            },
+            {
+              "entity": "scene.focus_work",
+              "name": "Focus Desk",
+              "icon": "mdi:laptop",
+              "state": "off",
+              "action": "call_service",
+              "service": "scene.turn_on"
+            },
+            {
+              "entity": "script.turn_off_all_lights",
+              "name": "All Lights Off",
+              "icon": "mdi:lightbulb-multiple-off",
+              "state": "off",
+              "action": "call_service",
+              "service": "script.turn_on"
+            },
+            {
+              "entity": "scene.morning_bright",
+              "name": "Morning Sun",
+              "icon": "mdi:weather-sunny",
+              "state": "off",
+              "action": "call_service",
+              "service": "scene.turn_on"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

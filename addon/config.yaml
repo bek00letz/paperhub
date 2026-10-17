@@ -1,0 +1,30 @@
+name: PaperHub
+version: "1.0.0"
+slug: paperhub
+description: "Ambient E-Ink Touch Controller for Home Assistant. Zero-latency server-side rasterization for Onyx Boox, Kindle, Kobo, and reMarkable with 16-level Carta grayscale."
+url: https://github.com/bek00letz/paperhub
+arch:
+  - amd64
+  - aarch64
+init: false
+
+# The visual editor runs behind Home Assistant's authentication in the sidebar.
+ingress: true
+ingress_port: 8080
+panel_icon: mdi:tablet-dashboard
+panel_title: PaperHub
+
+# LAN port for e-readers (Onyx Boox, Kindle, Kobo, Fully Kiosk) to fetch frames and send touches
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: Frame fetches and touch API for e-readers (LAN)
+
+# Supervisor injects token for Home Assistant REST & WebSocket API
+homeassistant_api: true
+
+options:
+  refresh_seconds: 60
+schema:
+  refresh_seconds: "int(10,3600)"
+  frame_token: "password?"

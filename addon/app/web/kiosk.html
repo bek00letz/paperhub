@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>PaperHub Kiosk</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#FFFFFF">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background-color: #FFFFFF;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
+    }
+    #viewport {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #FFFFFF;
+      touch-action: none;
+    }
+    #frame {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
+      cursor: pointer;
+    }
+    /* Unobtrusive tactile feedback ring */
+    .touch-ripple {
+      position: absolute;
+      width: 48px;
+      height: 48px;
+      margin-left: -24px;
+      margin-top: -24px;
+      border: 3px solid #000000;
+      border-radius: 50%;
+      pointer-events: none;
+      opacity: 0.7;
+      transform: scale(0.6);
+      animation: ripple 0.25s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+    }
+    @keyframes ripple {
+      0% {
+        transform: scale(0.6);
+        opacity: 0.7;
+      }
+      100% {
+        transform: scale(1.2);
+        opacity: 0;
+      }
+    }
+    /* Minimal Connection Status Pill */
+    #status-pill {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      padding: 4px 10px;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid #DDDDDD;
+      border-radius: 12px;
+      font-size: 11px;
+      color: #666666;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+    #status-pill.visible {
+      opacity: 1;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #000000;
+    }
+    .status-dot.error {
+      background: #FF3B30;
+    }
+  </style>
+</head>
+<body>
+  <div id="viewport">
+    <img id="frame" alt="PaperHub Screen" src="/frame.png">
+    <div id="status-pill">
+      <span class="status-dot"></span>
+      <span id="status-text">PaperHub</span>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const img = document.getElementById('frame');
+      const viewport = document.getElementById('viewport');
+      const statusPill = document.getElementById('status-pill');
+      const statusText = document.getElementById('status-text');
+      const statusDot = statusPill.querySelector('.status-dot');
+
+      // Determine device ID from URL: /kiosk or /kiosk/{device_id} or ?device=...
+      const pathParts = window.location.pathname.split('/').filter(Boolean);
+      let deviceId = "default";
+      if (pathParts.length >= 2 && pathParts[0] === 'kiosk') {
+        deviceId = pathParts[1];
+      } else {
+        const params = new URLSearchParams(window.location.search);
+        if (params.has('device')) {
+          deviceId = params.get('device');
+        }
+      }
+
+      const frameBaseUrl = `/api/devices/${encodeURIComponent(deviceId)}/frame.png`;
+      const touchUrl = `/api/devices/${encodeURIComponent(deviceId)}/touch`;
+      const eventsUrl = `/api/devices/${encodeURIComponent(deviceId)}/events`;
+
+      let touchStartX = 0;
+      let touchStartY = 0;
+      let touchStartTime = 0;
+      let isTouching = false;
+      let lastTouchHandled = 0;
+
+      function showStatus(text, isError = false, timeout = 2000) {
+        statusText.textContent = text;
+        statusDot.className = 'status-dot' + (isError ? ' error' : '');
+        statusPill.classList.add('visible');
+        if (timeout > 0) {
+          setTimeout(() => statusPill.classList.remove('visible'), timeout);
+        }
+      }
+
+      function refreshFrame(version) {
+        const v = version || Date.now();
+        const sep = frameBaseUrl.includes('?') ? '&' : '?';
+        const nextSrc = `${frameBaseUrl}${sep}v=${v}`;
+        
+        // Preload image off-screen for zero flicker
+        const preload = new Image();
+        preload.onload = () => {
+          img.src = nextSrc;
+        };
+        preload.onerror = () => {
+          // If preload fails, attempt direct set
+          img.src = nextSrc;
+        };
+        preload.src = nextSrc;
+      }
+
+      // Convert screen client coordinates (clientX, clientY) to native image pixels
+      function getNativeCoords(clientX, clientY) {
+        const rect = img.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
+        
+        const scaleX = (img.naturalWidth || rect.width) / rect.width;
+        const scaleY = (img.naturalHeight || rect.height) / rect.height;
+        
+        const imgX = (clientX - rect.left) * scaleX;
+        const imgY = (clientY - rect.top) * scaleY;
+        
+        return {
+          x: Math.round(Math.max(0, Math.min(img.naturalWidth || rect.width, imgX))),
+          y: Math.round(Math.max(0, Math.min(img.naturalHeight || rect.height, imgY)))
+        };
+      }
+
+      function spawnRipple(clientX, clientY) {
+        const ripple = document.createElement('div');
+        ripple.className = 'touch-ripple';
+        ripple.style.left = `${clientX}px`;
+        ripple.style.top = `${clientY}px`;
+        viewport.appendChild(ripple);
+        setTimeout(() => ripple.remove(), 300);
+      }
+
+      async function sendTouch(nativeX, nativeY, gesture = "") {
+        const now = Date.now();
+        if (now - lastTouchHandled < 150) return; // Debounce rapid double-fires
+        lastTouchHandled = now;
+
+        try {
+          const resp = await fetch(touchUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ x: nativeX, y: nativeY, gesture: gesture })
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.version) {
+              refreshFrame(data.version);
+            } else {
+              refreshFrame();
+            }
+          }
+        } catch (err) {
+          console.error("Touch transmission failed:", err);
+          showStatus("Offline", true);
+        }
+      }
+
+      // Pointer / Touch Listeners with swipe gesture recognition
+      viewport.addEventListener('pointerdown', (e) => {
+        isTouching = true;
+        touchStartX = e.clientX;
+        touchStartY = e.clientY;
+        touchStartTime = Date.now();
+        spawnRipple(e.clientX, e.clientY);
+      }, { passive: true });
+
+      viewport.addEventListener('pointerup', (e) => {
+        if (!isTouching) return;
+        isTouching = false;
+        
+        const deltaX = e.clientX - touchStartX;
+        const deltaY = e.clientY - touchStartY;
+        const elapsed = Date.now() - touchStartTime;
+        const absX = Math.abs(deltaX);
+        const absY = Math.abs(deltaY);
+
+        // Check for horizontal swipe gesture (at least 60px distance and primarily horizontal)
+        if (absX > 60 && absX > absY * 1.5 && elapsed < 800) {
+          const gesture = deltaX < 0 ? 'swipe_left' : 'swipe_right';
+          sendTouch(0, 0, gesture);
+          return;
+        }
+
+        // Tap event
+        const coords = getNativeCoords(e.clientX, e.clientY);
+        sendTouch(coords.x, coords.y, 'tap');
+      }, { passive: true });
+
+      // SSE connection for immediate real-time pushes
+      function connectSSE() {
+        const es = new EventSource(eventsUrl);
+        es.onopen = () => {
+          showStatus("Connected");
+        };
+        es.onmessage = (e) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data.event === 'render' || data.event === 'init') {
+              refreshFrame(data.version);
+            }
+          } catch (err) {}
+        };
+        es.onerror = () => {
+          es.close();
+          setTimeout(connectSSE, 4000);
+        };
+      }
+
+      // WakeLock for ambient kiosk operation
+      async function requestWakeLock() {
+        if ('wakeLock' in navigator) {
+          try {
+            await navigator.wakeLock.request('screen');
+          } catch (e) {}
+        }
+      }
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          refreshFrame();
+          requestWakeLock();
+        }
+      });
+
+      // Initial startup
+      refreshFrame();
+      connectSSE();
+      requestWakeLock();
+    })();
+  </script>
+</body>
+</html>
