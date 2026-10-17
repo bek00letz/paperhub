@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.5.1 - Prominent 50% Chevrons, Dynamic Canvas Edge Expansion, Zero-Modal Ingress Presets & Resilient Entities
+
+- **Prominent Edge Navigation Chevrons**:
+  - Replaced tiny 44px text glyphs with imposing, Apple-grade geometric chevrons spanning **half the screen tall (50% canvas height)** and **edge-width wide (55%–65% gutter width)**.
+  - In Python layout rasterization (`layout.py`), rendered with smooth curved polyline strokes (`T.GRAY_MID`, 8–10px thick) centered within the left and right navigation gutters.
+  - In the visual editor (`index.html`), rendered with high-precision vector SVGs (`.edge-chevron-svg`) with dark mode support and tactile hover scaling.
+- **Physical Canvas Increase & Decrease on Edge Zones Toggle**:
+  - Clicking `📖 Edge Zones` now immediately reflows elements on the page between constrained center mode (`[edge_w, cw - edge_w]`) and full-width mode (`[margin, cw - margin]`).
+  - When disabled, tiles, cards, and wide widgets expand horizontally across the entire liberated display width.
+  - When enabled, elements cleanly contract to fit within safe gutters.
+  - Toggling edge navigation automatically persists to `layouts.json` and notifies devices.
+- **Robust Preset Page Creation in Sandboxed Ingress**:
+  - Eliminated `window.prompt()` which was blocked inside Home Assistant Ingress iframes.
+  - Clicking any preset in the Preset Library automatically generates a clean, unique page slug (e.g. `airspace_radar`, `formula_1`), initializes rotation arrays safely, reflows elements to canvas dimensions, selects the page, and commits via `saveLayouts()`.
+  - Introduced an Apple-standard in-DOM dialog modal (`#promptmodal`) with keyboard navigation (Enter/Escape) for custom page creation, duplication, and renaming, completely immune to iframe sandboxing.
+- **Resilient Friendly Entities & Token Handling**:
+  - Recognized Home Assistant `SUPERVISOR_TOKEN` automatically in addition to `HA_TOKEN`.
+  - Added graceful fallback in `api_entities`: if Home Assistant Core or Supervisor times out or experiences a transient error, the endpoint gracefully serves cached entities or offline fixtures with complete friendly names instead of throwing an HTTP 500 error.
+  - Added a dedicated `↻ Reload` button in the Entities Explorer header with automatic background retry if entities are initially empty.
+  - Added an `Auto` friendly name sync button in Tile properties to instantly sync card titles with the bound Home Assistant entity.
+- **Landscape Touch Hit-Testing Accuracy**:
+  - Fixed an orientation clamping bug in `_clamp_box` where landscape screens were previously clamped using portrait dimensions, eliminating touch misregistration and preventing false page turns when tapping elements on the right half of rotated screens.
+- **Automated Test Suite**:
+  - Added 3 new unit tests covering landscape hit-testing accuracy, prominent chevron rendering, and resilient entity fallback (30 total tests, 100% passing).
+
 ## 1.5.0 - Airspace Radar, Flight Telemetry, Formula 1 Pit-Wall & Live Sports Scoreboards
 
 - **Overhead Airspace Radar & Flight Telemetry (`flight_tracker` / `flight_radar`)**:

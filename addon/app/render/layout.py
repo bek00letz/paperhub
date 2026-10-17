@@ -89,8 +89,8 @@ def _anchor_x(align, x, w):
     return {"left": x, "center": x + w // 2, "right": x + w}.get(align, x)
 
 
-def _clamp_box(el, default_w=200, default_h=60, display=None):
-    cw, ch = T.canvas_dims(0, display)
+def _clamp_box(el, default_w=200, default_h=60, display=None, orientation=0):
+    cw, ch = T.canvas_dims(orientation, display)
     x = max(0, min(cw - 1, int(el.get("x", 0))))
     y = max(0, min(ch - 1, int(el.get("y", 0))))
     w = max(1, min(cw - x, int(el.get("w", default_w))))
@@ -1519,16 +1519,28 @@ def render_page(
             # One bad element must never crash the page
             continue
 
-    # Subtle page turn chevrons in edge gutters when multiple pages are configured
+    # Prominent book-turn navigation chevrons (half the screen tall & edge-width wide)
     if edge_nav and edge_nav_ratio > 0 and page_info and page_info.get("total", 1) > 1:
         cw, ch = T.canvas_dims(orientation, display)
-        mid_y = ch // 2
-        f_chevron = T.font(size=44, bold=False, family="lato")
         edge_w = int(cw * float(edge_nav_ratio))
-        # Left subtle chevron indicator
-        d.text((edge_w // 2, mid_y), "‹", fill=T.GRAY_MUTED, font=f_chevron, anchor="mm")
-        # Right subtle chevron indicator
-        d.text((cw - edge_w // 2, mid_y), "›", fill=T.GRAY_MUTED, font=f_chevron, anchor="mm")
+        chev_h = int(ch * 0.50)  # exactly half the screen tall
+        chev_w = max(16, int(edge_w * 0.55))  # edge-width wide
+        mid_y = ch // 2
+        top_y = mid_y - chev_h // 2
+        bot_y = mid_y + chev_h // 2
+        stroke_w = max(4, min(14, int(cw * 0.007)))
+
+        # Left Chevron (points left <) centered in left edge zone [0, edge_w]
+        left_cx = edge_w // 2
+        left_tip_x = max(stroke_w + 4, left_cx - chev_w // 2)
+        left_arm_x = min(edge_w - stroke_w - 4, left_tip_x + chev_w)
+        d.line([(left_arm_x, top_y), (left_tip_x, mid_y), (left_arm_x, bot_y)], fill=T.GRAY_MID, width=stroke_w, joint="curve")
+
+        # Right Chevron (points right >) centered in right edge zone [cw - edge_w, cw]
+        right_cx = cw - edge_w // 2
+        right_tip_x = min(cw - stroke_w - 4, right_cx + chev_w // 2)
+        right_arm_x = max(cw - edge_w + stroke_w + 4, right_tip_x - chev_w)
+        d.line([(right_arm_x, top_y), (right_tip_x, mid_y), (right_arm_x, bot_y)], fill=T.GRAY_MID, width=stroke_w, joint="curve")
 
     # Ambient footer with time, page dots, battery
     T.footer(
@@ -1566,7 +1578,7 @@ def hit_test(page, x, y, *, display=None, orientation=0, edge_nav_ratio=0.15):
     elements = page.get("elements", [])
     for i in reversed(range(len(elements))):
         el = elements[i]
-        ex, ey, ew, eh = _clamp_box(el, display=display)
+        ex, ey, ew, eh = _clamp_box(el, display=display, orientation=orientation)
         if not (ex <= x <= ex + ew and ey <= y <= ey + eh):
             continue
 

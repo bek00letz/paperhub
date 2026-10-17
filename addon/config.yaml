@@ -1,5 +1,5 @@
 name: PaperHub
-version: "1.5.0"
+version: "1.5.1"
 slug: paperhub
 description: "Ambient E-Ink Touch Controller for Home Assistant. Zero-latency server-side rasterization for Onyx Boox, Kindle, Kobo, and reMarkable with 16-level Carta grayscale."
 url: https://github.com/bek00letz/paperhub

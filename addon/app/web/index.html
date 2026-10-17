@@ -494,13 +494,24 @@ main {
   border-right: none;
   border-left: 1.5px dashed rgba(0, 0, 0, 0.22);
 }
-.edge-chevron {
-  font-size: 42px;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
-  font-weight: 200;
-  line-height: 1;
-  color: #111111;
-  opacity: 0.75;
+.edge-chevron-svg {
+  width: 65%;
+  height: 50%;
+  max-height: 50%;
+  color: rgba(0, 0, 0, 0.45);
+  filter: drop-shadow(0 1px 2px rgba(255, 255, 255, 0.8));
+  transition: transform 0.2s cubic-bezier(0.25, 1, 0.5, 1), color 0.2s ease;
+}
+.edge-turn-zone:hover .edge-chevron-svg {
+  color: rgba(0, 0, 0, 0.8);
+  transform: scale(1.04);
+}
+body.dark-mode .edge-chevron-svg {
+  color: rgba(255, 255, 255, 0.45);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+}
+body.dark-mode .edge-turn-zone:hover .edge-chevron-svg {
+  color: rgba(255, 255, 255, 0.85);
 }
 .edge-label {
   writing-mode: vertical-rl;
@@ -510,10 +521,14 @@ main {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #333333;
-  opacity: 0.65;
-  background: rgba(255, 255, 255, 0.85);
+  opacity: 0.75;
+  background: rgba(255, 255, 255, 0.9);
   padding: 6px 3px;
   border-radius: 4px;
+}
+body.dark-mode .edge-label {
+  color: #eeeeee;
+  background: rgba(30, 30, 30, 0.9);
 }
 
 /* Tactile Touch Badge on Canvas Elements */
@@ -1226,11 +1241,15 @@ aside {
       <div id="canvas-housing">
         <div id="canvas">
           <div class="edge-turn-zone edge-left">
-            <span class="edge-chevron">‹</span>
+            <svg class="edge-chevron-svg" viewBox="0 0 100 400" preserveAspectRatio="none">
+              <path d="M 70 20 L 25 200 L 70 380" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
             <span class="edge-label">PREV PAGE</span>
           </div>
           <div class="edge-turn-zone edge-right">
-            <span class="edge-chevron">›</span>
+            <svg class="edge-chevron-svg" viewBox="0 0 100 400" preserveAspectRatio="none">
+              <path d="M 30 20 L 75 200 L 30 380" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
             <span class="edge-label">NEXT PAGE</span>
           </div>
           <div class="safe-zone safe-footer"><span id="safefootertag" class="safe-tag" style="right:8px;top:4px">footer zone</span></div>
@@ -1342,9 +1361,12 @@ aside {
 
     <!-- Entities Explorer Card -->
     <div class="card">
-      <h3>
-        <span>Entities</span>
-        <span class="badge-tag" id="entcount">0</span>
+      <h3 style="display:flex;align-items:center;justify-content:space-between">
+        <span style="display:flex;align-items:center;gap:6px">
+          <span>Entities</span>
+          <span class="badge-tag" id="entcount">0</span>
+        </span>
+        <button id="entrefreshbtn" class="sm icon-btn" title="Reload entities from Home Assistant" style="padding:1px 8px;font-size:11px;height:22px;font-weight:600">↻ Reload</button>
       </h3>
       <div class="body">
         <!-- Filter chips for fast zero-friction discovery -->
@@ -1364,6 +1386,23 @@ aside {
     </div>
   </aside>
 </main>
+
+<!-- Native In-DOM Dialog Modal for Safe Ingress Operations -->
+<div id="promptmodal" class="modal-wrap">
+  <div class="modal-card" style="width:min(440px,92vw)">
+    <div class="row" style="margin:0 0 10px 0">
+      <strong style="font-size:15px;flex:1" id="prompttitle">Action</strong>
+      <button id="promptclose" class="sm">✕</button>
+    </div>
+    <div class="row" style="margin:0 0 14px 0">
+      <input id="promptinput" type="text" style="flex:1" autocomplete="off" spellcheck="false">
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button id="promptcancel" class="sm">Cancel</button>
+      <button id="promptok" class="sm primary" style="font-weight:600;padding:5px 16px">Done</button>
+    </div>
+  </div>
+</div>
 
 <!-- Preset / Template Library Modal -->
 <div id="templatewrap" class="modal-wrap">
@@ -1986,7 +2025,7 @@ function reflowPageElements(p, toPortrait) {
   const usableW = rightBound - leftBound;
 
   const tiles = list.filter(e => ["tile", "light_tile", "switch_tile", "climate_tile", "sensor_tile", "media_tile", "action_tile"].includes(e.type));
-  const widgets = list.filter(e => ["calendar_timeline", "weather_forecast"].includes(e.type));
+  const widgets = list.filter(e => ["calendar_timeline", "weather_forecast", "flight_tracker", "flight_radar", "sports_racing", "sports_match"].includes(e.type));
   const grids = list.filter(e => e.type === "dynamic_grid");
   const icons = list.filter(e => e.type === "icon");
   const curves = list.filter(e => e.type === "curve");
@@ -2015,7 +2054,11 @@ function reflowPageElements(p, toPortrait) {
       w.x = leftBound;
       w.y = cursorY;
       w.w = usableW;
-      w.h = w.type === "calendar_timeline" ? Math.min(360, Math.round(safeH * 0.38)) : Math.min(280, Math.round(safeH * 0.30));
+      if (w.type === "calendar_timeline") w.h = Math.min(360, Math.round(safeH * 0.38));
+      else if (w.type === "flight_tracker" || w.type === "flight_radar") w.h = Math.min(360, Math.round(safeH * 0.35));
+      else if (w.type === "sports_racing") w.h = Math.min(360, Math.round(safeH * 0.35));
+      else if (w.type === "sports_match") w.h = Math.min(300, Math.round(safeH * 0.28));
+      else w.h = Math.min(280, Math.round(safeH * 0.30));
       cursorY += w.h + gap;
     });
 
@@ -2102,6 +2145,7 @@ function reflowPageElements(p, toPortrait) {
 
   // General layout proportional scaling
   list.forEach(el => {
+    if (el.w > usableW) el.w = usableW;
     el.x = Math.max(leftBound, Math.min(rightBound - el.w, el.x));
   });
 }
@@ -2166,6 +2210,30 @@ async function refreshStatus() {
   } catch (_) {}
 }
 
+async function reloadEntities(showToast = false) {
+  try {
+    const rawEnts = await api("api/entities").then(r => r.json()).catch(() => []);
+    ents = (Array.isArray(rawEnts) ? rawEnts : []).map(e => {
+      const attrs = e.attributes || {};
+      const friendly = e.name || attrs.friendly_name || (e.entity_id ? e.entity_id.split(".").pop().replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Entity");
+      const unit = e.unit || attrs.unit_of_measurement || "";
+      return { ...e, name: friendly, unit, attributes: attrs };
+    });
+    if ($("entcount")) $("entcount").textContent = ents.length;
+    if ($("entities-dl")) {
+      $("entities-dl").innerHTML = ents.map(e => `<option value="${esc(e.entity_id)}">${esc(e.name || e.entity_id)} (${esc(e.state)})</option>`).join("");
+    }
+    drawEntities($("search") ? $("search").value : "");
+    if (showToast) {
+      msg(`Loaded ${ents.length} entities from Home Assistant.`);
+    }
+    return ents;
+  } catch (err) {
+    if (showToast) msg("Failed to load entities: " + err.message);
+    return [];
+  }
+}
+
 async function boot() {
   initMdiMap();
   spec = await api("api/layouts").then(r => r.json());
@@ -2174,16 +2242,13 @@ async function boot() {
   if (spec.rotate_seconds === undefined) spec.rotate_seconds = 30;
   if ($("rotinterval")) $("rotinterval").value = String(spec.rotate_seconds);
   syncOrientUI();
-  const rawEnts = await api("api/entities").then(r => r.json()).catch(() => []);
-  ents = (Array.isArray(rawEnts) ? rawEnts : []).map(e => {
-    const attrs = e.attributes || {};
-    const friendly = e.name || attrs.friendly_name || (e.entity_id ? e.entity_id.split(".").pop().replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Entity");
-    const unit = e.unit || attrs.unit_of_measurement || "";
-    return { ...e, name: friendly, unit, attributes: attrs };
-  });
-  $("entcount").textContent = ents.length;
-  $("entities-dl").innerHTML = ents.map(e => `<option value="${esc(e.entity_id)}">${esc(e.name || e.entity_id)} (${esc(e.state)})</option>`).join("");
-  drawEntities("");
+  await reloadEntities(false);
+  if (ents.length === 0) {
+    setTimeout(() => reloadEntities(false), 2000);
+  }
+  if ($("entrefreshbtn")) {
+    $("entrefreshbtn").onclick = () => reloadEntities(true);
+  }
   fillPages();
   snapshot();
   select(Object.keys(spec.pages)[0]);
@@ -3115,7 +3180,12 @@ function props() {
 
   let h = '<div class="grp"><div class="lbl">Content &amp; Source</div>';
   if (["tile", "light_tile", "switch_tile", "climate_tile", "sensor_tile", "action_tile"].includes(el.type)) {
-    h += `<div class="row"><label>title</label><input data-k="title" id="tile_title_inp" type="text" placeholder="e.g. Ceiling Light" value="${esc(el.title || el.name || '')}"></div>
+    h += `<div class="row"><label>title</label>
+        <div style="display:flex;gap:6px;align-items:center;flex:1">
+          <input data-k="title" id="tile_title_inp" type="text" placeholder="Auto / Friendly Name" value="${esc(el.title || el.name || '')}" style="flex:1">
+          <button id="tile_sync_title_btn" class="sm" title="Reset to Home Assistant friendly name" style="padding:2px 8px;font-size:11px;font-weight:600">Auto</button>
+        </div>
+      </div>
       <div class="row"><label>entity</label><input data-k="entity" id="tile_ent_inp" type="text" list="entities-dl" placeholder="light.living_room" value="${esc(el.entity || '')}"></div>
       <div class="row"><label>subtitle</label><input data-k="subtitle" type="text" placeholder="Auto (On • 80% / Off) or Jinja template" value="${esc(el.subtitle || '')}"></div>
       <div class="row"><label>active icon</label>
@@ -3581,6 +3651,20 @@ function props() {
   if ($("tile_browse_off_icon_btn")) $("tile_browse_off_icon_btn").onclick = pickTileOffIcon;
   if ($("tile_browse_off_icon")) $("tile_browse_off_icon").onclick = pickTileOffIcon;
 
+  const syncTitleToFriendly = () => {
+    const val = (el.entity || "").trim();
+    if (!val) return;
+    const match = ents.find(x => x.entity_id === val);
+    const friendly = match ? (match.name || "") : val.split(".").pop().replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    if (friendly) {
+      snapshot();
+      el.title = friendly;
+      paint(); preview(); props();
+      msg(`Tile title set to "${friendly}".`);
+    }
+  };
+  if ($("tile_sync_title_btn")) $("tile_sync_title_btn").onclick = syncTitleToFriendly;
+
   const tileEntInp = box.querySelector("#tile_ent_inp");
   if (tileEntInp) {
     tileEntInp.onchange = () => {
@@ -3589,7 +3673,8 @@ function props() {
       el.entity = val;
       const match = ents.find(x => x.entity_id === val);
       const friendly = match ? (match.name || "") : val.split(".").pop().replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-      if (!el.title || el.title === "Accessory" || el.title === "Ceiling Light" || el.title === "Wall Outlet") {
+      const genericTitles = ["Accessory", "Ceiling Light", "Wall Outlet", "Thermostat", "Indoor Temp", "Good Night", "Switch Tile", "Light Tile", "Sensor Tile", "Climate Tile"];
+      if (!el.title || genericTitles.includes(el.title)) {
         el.title = friendly;
       }
       if (!el.icon || el.icon === "mdi:power" || el.icon === "mdi:lightbulb") {
@@ -3728,44 +3813,53 @@ $("tier").onchange = e => {
 };
 $("hold").onchange = e => { snapshot(); page().hold_minutes = Number(e.target.value) || 10; };
 
-$("addpage").onclick = () => {
-  const raw = prompt("Page name (lowercase letters, numbers, underscores):");
+$("addpage").onclick = async () => {
+  let count = 1;
+  while (spec.pages && spec.pages[`page_${count}`]) count++;
+  const raw = await showPrompt("Create Blank Page:", `page_${count}`);
   if (!raw) return;
   const n = raw.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
   if (!n) { msg("Invalid page name."); return; }
+  if (spec.pages && spec.pages[n]) { msg(`A page named "${n}" already exists.`); return; }
   snapshot();
+  spec.pages = spec.pages || {};
   spec.pages[n] = { tier: "rotate", elements: [] };
+  spec.rotation = spec.rotation || [];
   if (!spec.rotation.includes(n)) spec.rotation.push(n);
-  fillPages(); select(n);
+  fillPages();
+  select(n);
+  await saveLayouts();
 };
 
-$("duppage").onclick = () => {
+$("duppage").onclick = async () => {
   if (!cur || !page()) return;
   let defaultName = cur + "_copy";
   let count = 1;
-  while (spec.pages[defaultName]) {
+  while (spec.pages && spec.pages[defaultName]) {
     count++;
     defaultName = `${cur}_copy${count}`;
   }
-  const raw = prompt(`Duplicate "${cur}" as:`, defaultName);
+  const raw = await showPrompt(`Duplicate "${cur}" as:`, defaultName);
   if (!raw) return;
   const n = raw.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
   if (!n) { msg("Invalid page name."); return; }
   if (spec.pages[n]) { msg(`A page named "${n}" already exists.`); return; }
   snapshot();
   spec.pages[n] = JSON.parse(JSON.stringify(page()));
+  spec.rotation = spec.rotation || [];
   if (!spec.rotation.includes(n) && (page().tier || "rotate") === "rotate") {
     spec.rotation.push(n);
   }
   fillPages();
   select(n);
+  await saveLayouts();
   msg(`Duplicated "${cur}" to "${n}".`, { label: "Undo", run: undo });
 };
 
-$("renamepage").onclick = () => {
+$("renamepage").onclick = async () => {
   if (!cur || !page()) return;
   const oldName = cur;
-  const raw = prompt(`Rename page "${oldName}" to:`, oldName);
+  const raw = await showPrompt(`Rename page "${oldName}" to:`, oldName);
   if (!raw) return;
   const newName = raw.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
   if (!newName) { msg("Invalid page name."); return; }
@@ -3784,6 +3878,7 @@ $("renamepage").onclick = () => {
 
   fillPages();
   select(newName);
+  await saveLayouts();
   msg(`Renamed "${oldName}" to "${newName}".`, { label: "Undo", run: undo });
 };
 
@@ -3870,11 +3965,17 @@ $("safebtn").onclick = () => {
   $("safebtn").classList.toggle("active", canvas.classList.contains("show-safe"));
 };
 if ($("edgenavbtn")) {
-  $("edgenavbtn").onclick = () => {
+  $("edgenavbtn").onclick = async () => {
+    snapshot();
     spec.edge_nav = spec.edge_nav === false ? true : false;
+    reflowPageElements(page(), isPortrait());
     syncOrientUI();
     paint(); preview();
-    msg(spec.edge_nav ? "Edge turn zones enabled (15% left/right gutters reserved)." : "Edge turn zones disabled (Swipes only).");
+    await saveLayouts();
+    msg(spec.edge_nav
+      ? "Edge turn zones enabled: Canvas constrained to safe center zone."
+      : "Edge turn zones disabled: Canvas expanded to full display width."
+    );
   };
 }
 
@@ -4626,12 +4727,49 @@ function buildTemplateLibrary() {
   });
 }
 
-function applyPresetToPage(preset) {
-  const pageName = prompt(`Create page for "${preset.title}":`, preset.id);
-  if (!pageName) return;
-  const n = pageName.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-  if (!n) return;
-  if (spec.pages[n]) { msg(`A page named "${n}" already exists.`); return; }
+let promptResolve = null;
+function showPrompt(title, defaultValue = "") {
+  return new Promise(resolve => {
+    promptResolve = resolve;
+    $("prompttitle").textContent = title;
+    $("promptinput").value = defaultValue;
+    $("promptmodal").style.display = "flex";
+    setTimeout(() => {
+      $("promptinput").focus();
+      $("promptinput").select();
+    }, 40);
+  });
+}
+const closePromptModal = (val) => {
+  $("promptmodal").style.display = "none";
+  if (promptResolve) {
+    const res = promptResolve;
+    promptResolve = null;
+    res(val);
+  }
+};
+if ($("promptok")) $("promptok").onclick = () => closePromptModal($("promptinput").value.trim());
+if ($("promptcancel")) $("promptcancel").onclick = () => closePromptModal(null);
+if ($("promptclose")) $("promptclose").onclick = () => closePromptModal(null);
+if ($("promptmodal")) {
+  $("promptmodal").onclick = e => { if (e.target.id === "promptmodal") closePromptModal(null); };
+}
+if ($("promptinput")) {
+  $("promptinput").onkeydown = e => {
+    if (e.key === "Enter") { e.preventDefault(); closePromptModal($("promptinput").value.trim()); }
+    if (e.key === "Escape") { e.preventDefault(); closePromptModal(null); }
+  };
+}
+
+async function applyPresetToPage(preset) {
+  let baseId = preset.id.toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
+  let n = baseId;
+  let count = 1;
+  spec.pages = spec.pages || {};
+  while (spec.pages[n]) {
+    count++;
+    n = `${baseId}_${count}`;
+  }
 
   snapshot();
   const els = preset.makeElements("");
@@ -4640,7 +4778,14 @@ function applyPresetToPage(preset) {
     elements: els
   };
   if (preset.show_if) spec.pages[n].show_if = preset.show_if;
-  if (!spec.rotation.includes(n)) spec.rotation.push(n);
+  spec.rotation = spec.rotation || [];
+  if (!spec.rotation.includes(n) && (preset.tier || "rotate") !== "alert") {
+    spec.rotation.push(n);
+  }
+
+  // Reflow elements immediately according to current orientation and edge setting
+  reflowPageElements(spec.pages[n], isPortrait());
+
   fillPages();
   select(n);
   const dg = els.find(x => x.type === "dynamic_grid");
@@ -4648,7 +4793,8 @@ function applyPresetToPage(preset) {
     syncDynamicGridShowIf(dg);
   }
   $("templatewrap").style.display = "none";
-  msg(`Created "${preset.title}" page! Select an element to bind your entity.`);
+  await saveLayouts();
+  msg(`Created "${preset.title}" page! Select any element to customize.`);
 }
 
 $("templatebtn").onclick = () => $("templatewrap").style.display = "flex";

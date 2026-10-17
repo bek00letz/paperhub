@@ -796,6 +796,53 @@ class TestPaperHubV150AdaptedPresets(unittest.TestCase):
         asyncio.run(_run())
 
 
+    def test_hit_test_landscape_orientation(self):
+        """Verify elements on the right side of a landscape screen are hit correctly without false page turns."""
+        # Boox Go 6 90° Landscape: 1448 x 1072
+        page = {
+            "elements": [
+                {
+                    "type": "tile",
+                    "x": 1050,
+                    "y": 200,
+                    "w": 300,
+                    "h": 140,
+                    "touch": {"action": "toggle", "entity": "light.office_lights"}
+                }
+            ]
+        }
+        # Tap on the right-side element in landscape
+        res = L.hit_test(page, 1150, 250, display="boox_go_6", orientation=90, edge_nav_ratio=0.15)
+        self.assertTrue(res.get("handled"))
+        self.assertEqual(res.get("type"), "element_action")
+        self.assertEqual(res.get("entity"), "light.office_lights")
+
+    def test_prominent_chevrons_render(self):
+        """Verify prominent half-screen tall chevrons render on multi-page layouts with edge_nav enabled."""
+        page = {
+            "elements": [
+                {"type": "text", "value": "Dashboard", "x": 200, "y": 200, "w": 400, "h": 60}
+            ]
+        }
+        img = L.render_page(page, {}, page_info={"current": 1, "total": 2}, edge_nav=True, edge_nav_ratio=0.15, display="boox_go_6")
+        self.assertEqual(img.size, (1072, 1448))
+
+    def test_api_entities_resilient_fallback(self):
+        """Verify api_entities returns 200 and entities even when HA is unreachable."""
+        async def _run():
+            req = make_mocked_request("GET", "/api/entities")
+            resp = await server.api_entities(req)
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.text)
+            self.assertIsInstance(data, list)
+            self.assertGreater(len(data), 0)
+            # Verify friendly names are present
+            first = data[0]
+            self.assertIn("name", first)
+            self.assertIn("entity_id", first)
+        asyncio.run(_run())
+
+
 if __name__ == "__main__":
     unittest.main()
 

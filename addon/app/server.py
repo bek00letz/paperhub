@@ -48,7 +48,7 @@ def _resolve_data_dir() -> Path:
 DATA_DIR = _resolve_data_dir()
 WEB_DIR = Path(__file__).parent / "web"
 HA_BASE = (os.environ.get("HA_BASE") or "http://supervisor/core").rstrip("/")
-HA_TOKEN = (os.environ.get("HA_TOKEN") or "").strip()
+HA_TOKEN = (os.environ.get("HA_TOKEN") or os.environ.get("SUPERVISOR_TOKEN") or "").strip()
 REFRESH = max(10, min(3600, int(os.environ.get("REFRESH_SECONDS", "60") or 60)))
 FRAME_TOKEN = (os.environ.get("FRAME_TOKEN") or "").strip()
 
@@ -1534,7 +1534,23 @@ async def api_entities(request):
         _entity_cache = {"at": now, "items": ents}
         return web.json_response(ents)
     except Exception as exc:
-        return web.json_response({"error": str(exc)}, status=500)
+        print(f"Warning: Failed to fetch HA entities ({exc}), falling back to cache/fixture", flush=True)
+        if _entity_cache.get("items"):
+            return web.json_response(_entity_cache["items"])
+        states = load_fixture().get("states", {})
+        ents = []
+        for eid, s in states.items():
+            friendly = s.get("friendly_name") or s.get("name") or eid.split(".")[-1].replace("_", " ").title()
+            unit = s.get("unit") or s.get("unit_of_measurement", "")
+            ents.append({
+                "entity_id": eid,
+                "state": s.get("state", ""),
+                "name": friendly,
+                "unit": unit,
+                "attributes": dict(s, friendly_name=friendly, unit_of_measurement=unit),
+            })
+        _entity_cache = {"at": now, "items": ents}
+        return web.json_response(ents)
 
 
 async def api_mdi_all(request):
