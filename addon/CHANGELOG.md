@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.5.4 - True Responsive Reflow Engine, Zero Tile Overlap & Toolbar Reflow Action
+
+- **True Responsive Reflow Engine**:
+  - Completely replaced naive ratio coordinate scaling with a structural, grid-aware responsive reflow engine.
+  - Automatically groups tiles and buttons into visual rows based on vertical proximity and calculates exact, non-overlapping column widths with uniform gaps ($\text{tileW} = \lfloor (usableW - (N - 1) \times gap) / N \rfloor$).
+  - Eliminated the middle button overlap bug when toggling edge navigation zones on and off, guaranteeing 100% idempotent layout stability without coordinate drift.
+  - Handles nested card controls (e.g. thermostat plus/minus buttons inside container cards), docking them cleanly to the right side of cards with guaranteed spacing.
+  - Full-width widgets (`calendar_timeline`, `weather_forecast`, `dynamic_grid`, etc.) and container cards expand and contract smoothly across the usable area ($usableW$).
+  - Header text and action icons (Back button, Home icon) dock gracefully to the left and right bounds.
+- **Dedicated Toolbar `🔄 Reflow` Action**:
+  - Made the `🔄 Reflow` button permanently visible in the editor toolbar, giving users instant one-click dashboard normalization into a clean responsive layout.
+  - Toggling `📖 Edge Zones` automatically triggers the responsive reflow across all pages in the configuration.
+- **Default Layouts Alignment**:
+  - Normalized all default pages in `default_layouts.json` to responsive non-overlapping coordinates.
+- **Automated Verification**:
+  - Added `test_default_layouts_non_overlapping_tiles` unit test asserting non-overlapping tile geometry and uniform spacing. All 42 unit tests passing.
+
 ## 1.5.3 - Apple-Grade Tactile Chyrons, Collision Avoidance & Proportional Edge Reflow
 
 - **Elimination of Canvas Line Slicing & Content Collision Avoidance**:

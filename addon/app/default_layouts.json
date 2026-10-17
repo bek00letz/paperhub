@@ -10,9 +10,9 @@
       "elements": [
         {
           "type": "text",
-          "x": 64,
+          "x": 161,
           "y": 64,
-          "w": 600,
+          "w": 750,
           "h": 72,
           "value": "Living Room",
           "size": 48,
@@ -21,9 +21,9 @@
         },
         {
           "type": "text",
-          "x": 64,
+          "x": 161,
           "y": 140,
-          "w": 500,
+          "w": 750,
           "h": 40,
           "value": "{{ now().strftime('%A, %-d %B') }}",
           "size": 24,
@@ -33,7 +33,7 @@
         },
         {
           "type": "icon",
-          "x": 920,
+          "x": 831,
           "y": 64,
           "w": 80,
           "h": 80,
@@ -41,9 +41,9 @@
         },
         {
           "type": "tile",
-          "x": 64,
+          "x": 161,
           "y": 210,
-          "w": 456,
+          "w": 367,
           "h": 140,
           "radius": 24,
           "style": "standard",
@@ -58,9 +58,9 @@
         },
         {
           "type": "tile",
-          "x": 552,
+          "x": 544,
           "y": 210,
-          "w": 456,
+          "w": 367,
           "h": 140,
           "radius": 24,
           "style": "standard",
@@ -75,9 +75,9 @@
         },
         {
           "type": "tile",
-          "x": 64,
+          "x": 161,
           "y": 374,
-          "w": 456,
+          "w": 367,
           "h": 140,
           "radius": 24,
           "style": "standard",
@@ -92,15 +92,15 @@
         },
         {
           "type": "tile",
-          "x": 552,
+          "x": 544,
           "y": 374,
-          "w": 456,
+          "w": 367,
           "h": 140,
           "radius": 24,
           "style": "standard",
           "entity": "climate.living_room",
           "title": "Thermostat",
-          "subtitle": "21.5°C • Comfort",
+          "subtitle": "21.5\u00b0C \u2022 Comfort",
           "icon": "mdi:thermostat",
           "icon_off": "mdi:thermostat-box",
           "action": "navigate_page",
@@ -112,9 +112,9 @@
         },
         {
           "type": "tile",
-          "x": 64,
+          "x": 161,
           "y": 538,
-          "w": 456,
+          "w": 367,
           "h": 140,
           "radius": 24,
           "style": "standard",
@@ -132,9 +132,9 @@
         },
         {
           "type": "tile",
-          "x": 552,
+          "x": 544,
           "y": 538,
-          "w": 456,
+          "w": 367,
           "h": 140,
           "radius": 24,
           "style": "standard",
@@ -150,9 +150,9 @@
         },
         {
           "type": "weather_forecast",
-          "x": 64,
+          "x": 161,
           "y": 710,
-          "w": 944,
+          "w": 750,
           "h": 260,
           "radius": 24,
           "entity": "weather.home",
@@ -161,9 +161,9 @@
         },
         {
           "type": "calendar_timeline",
-          "x": 64,
+          "x": 161,
           "y": 994,
-          "w": 944,
+          "w": 750,
           "h": 360,
           "radius": 24,
           "entity": "calendar.personal",
@@ -172,9 +172,9 @@
         },
         {
           "type": "text",
-          "x": 64,
+          "x": 161,
           "y": 1380,
-          "w": 944,
+          "w": 750,
           "h": 40,
           "value": "Tap left / right edge to turn pages",
           "size": 20,
@@ -190,9 +190,9 @@
       "elements": [
         {
           "type": "text",
-          "x": 64,
+          "x": 161,
           "y": 64,
-          "w": 500,
+          "w": 750,
           "h": 72,
           "value": "Climate Control",
           "size": 48,
@@ -201,7 +201,7 @@
         },
         {
           "type": "button",
-          "x": 860,
+          "x": 763,
           "y": 64,
           "w": 148,
           "h": 64,
@@ -215,16 +215,16 @@
         },
         {
           "type": "card",
-          "x": 64,
+          "x": 161,
           "y": 180,
-          "w": 944,
+          "w": 750,
           "h": 360,
           "radius": 28,
           "shadow": true
         },
         {
           "type": "text",
-          "x": 104,
+          "x": 197,
           "y": 210,
           "w": 400,
           "h": 40,
@@ -236,12 +236,12 @@
         },
         {
           "type": "number",
-          "x": 104,
+          "x": 197,
           "y": 260,
           "w": 400,
           "h": 150,
           "value": "{{ state_attr('climate.living_room', 'temperature') or 21.5 }}",
-          "unit": "°C",
+          "unit": "\u00b0C",
           "decimals": 1,
           "size": 96,
           "bold": true,
@@ -249,7 +249,7 @@
         },
         {
           "type": "button",
-          "x": 620,
+          "x": 579,
           "y": 240,
           "w": 140,
           "h": 110,
@@ -259,12 +259,14 @@
             "action": "call_service",
             "service": "climate.set_temperature",
             "entity": "climate.living_room",
-            "data": { "temperature": 22.0 }
+            "data": {
+              "temperature": 22.0
+            }
           }
         },
         {
           "type": "button",
-          "x": 800,
+          "x": 735,
           "y": 240,
           "w": 140,
           "h": 110,
@@ -274,25 +276,27 @@
             "action": "call_service",
             "service": "climate.set_temperature",
             "entity": "climate.living_room",
-            "data": { "temperature": 21.0 }
+            "data": {
+              "temperature": 21.0
+            }
           }
         },
         {
           "type": "text",
-          "x": 104,
+          "x": 197,
           "y": 440,
-          "w": 800,
+          "w": 678,
           "h": 40,
-          "value": "Current: 21.8°C  •  Humidity: 46%  •  HVAC: Heating",
+          "value": "Current: 21.8\u00b0C  \u2022  Humidity: 46%  \u2022  HVAC: Heating",
           "size": 22,
           "bold": false,
           "family": "lato"
         },
         {
           "type": "dynamic_grid",
-          "x": 64,
+          "x": 161,
           "y": 580,
-          "w": 944,
+          "w": 750,
           "h": 360,
           "radius": 20,
           "gap": 16,
@@ -304,7 +308,9 @@
               "state": "on",
               "action": "call_service",
               "service": "climate.set_hvac_mode",
-              "data": { "hvac_mode": "heat" }
+              "data": {
+                "hvac_mode": "heat"
+              }
             },
             {
               "entity": "climate.living_room_cool",
@@ -313,7 +319,9 @@
               "state": "off",
               "action": "call_service",
               "service": "climate.set_hvac_mode",
-              "data": { "hvac_mode": "cool" }
+              "data": {
+                "hvac_mode": "cool"
+              }
             },
             {
               "entity": "switch.dehumidifier",
@@ -338,9 +346,9 @@
       "elements": [
         {
           "type": "text",
-          "x": 64,
+          "x": 161,
           "y": 64,
-          "w": 500,
+          "w": 750,
           "h": 72,
           "value": "Quick Scenes",
           "size": 48,
@@ -349,7 +357,7 @@
         },
         {
           "type": "button",
-          "x": 860,
+          "x": 763,
           "y": 64,
           "w": 148,
           "h": 64,
@@ -363,9 +371,9 @@
         },
         {
           "type": "dynamic_grid",
-          "x": 64,
+          "x": 161,
           "y": 180,
-          "w": 944,
+          "w": 750,
           "h": 900,
           "radius": 24,
           "gap": 20,
@@ -427,9 +435,9 @@
       "elements": [
         {
           "type": "text",
-          "x": 64,
+          "x": 161,
           "y": 64,
-          "w": 600,
+          "w": 750,
           "h": 72,
           "value": "Agenda & Forecast",
           "size": 48,
@@ -438,9 +446,9 @@
         },
         {
           "type": "text",
-          "x": 64,
+          "x": 161,
           "y": 140,
-          "w": 500,
+          "w": 750,
           "h": 40,
           "value": "{{ now().strftime('%A, %-d %B') }}",
           "size": 24,
@@ -450,7 +458,7 @@
         },
         {
           "type": "icon",
-          "x": 920,
+          "x": 831,
           "y": 64,
           "w": 80,
           "h": 80,
@@ -458,9 +466,9 @@
         },
         {
           "type": "calendar_timeline",
-          "x": 64,
+          "x": 161,
           "y": 200,
-          "w": 944,
+          "w": 750,
           "h": 460,
           "title": "Today's Schedule",
           "entity": "calendar.personal",
@@ -473,9 +481,9 @@
         },
         {
           "type": "weather_forecast",
-          "x": 64,
+          "x": 161,
           "y": 690,
-          "w": 944,
+          "w": 750,
           "h": 360,
           "title": "5-Day Weather Outlook",
           "entity": "weather.home",

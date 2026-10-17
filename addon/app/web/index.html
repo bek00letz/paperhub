@@ -1152,8 +1152,8 @@ aside {
     </select>
     <button id="edgenavbtn" class="sm" title="Toggle 15% edge book-turning navigation zones">📖 Edge Zones</button>
     <button id="safebtn" class="sm" title="Toggle footer &amp; padlock margin guides">Guides</button>
+    <button id="reflowbtn" class="sm" title="Reflow current dashboard into clean responsive grid" style="font-weight:600">🔄 Reflow</button>
     <a href="kiosk" target="_blank" class="sm" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;color:var(--text-primary);padding:3px 8px;font-weight:600" title="Open live Kiosk in new tab">📱 Kiosk</a>
-    <button id="reflowbtn" class="sm" title="Reflow current elements" style="display:none">Reflow</button>
   </div>
 
   <span class="spacer"></span>
@@ -2017,174 +2017,138 @@ function syncOrientUI() {
   }
 }
 
-/* Smooth proportional adaptation when toggling edge turn zones */
-function adaptElementsToEdgeNav(p, toEdgeActive) {
-  const list = p && p.elements;
-  if (!Array.isArray(list) || !list.length) return;
-
-  const disp = curDisplay();
-  const TW = curW();
-  const margin = Math.max(16, disp.margin || 32);
-  const edgeW = Math.round(TW * parseFloat(spec.edge_nav_ratio || 0.15));
-
-  let srcLeft, srcRight, dstLeft, dstRight;
-  if (toEdgeActive) {
-    srcLeft = margin;
-    srcRight = TW - margin;
-    dstLeft = Math.max(edgeW, margin);
-    dstRight = Math.min(TW - edgeW, TW - margin);
-  } else {
-    srcLeft = Math.max(edgeW, margin);
-    srcRight = Math.min(TW - edgeW, TW - margin);
-    dstLeft = margin;
-    dstRight = TW - margin;
-  }
-
-  const srcUsable = Math.max(1, srcRight - srcLeft);
-  const dstUsable = Math.max(1, dstRight - dstLeft);
-
-  list.forEach(el => {
-    const relX = (el.x - srcLeft) / srcUsable;
-    const relW = el.w / srcUsable;
-    let newX = Math.round(dstLeft + relX * dstUsable);
-    let newW = Math.max(16, Math.round(relW * dstUsable));
-
-    newX = Math.max(dstLeft, Math.min(dstRight - newW, newX));
-    if (newX + newW > dstRight) {
-      newW = Math.max(16, dstRight - newX);
-    }
-    el.x = newX;
-    el.w = newW;
-  });
-}
-
-/* Page reflow between orientations and canvas dimensions */
+/* True Responsive Reflow Engine for PaperHub Dashboards */
 function reflowPageElements(p, toPortrait) {
   const list = p && p.elements;
   if (!Array.isArray(list) || !list.length) return;
 
+  const isPort = toPortrait !== undefined ? Boolean(toPortrait) : isPortrait();
   const disp = curDisplay();
-  const TW = toPortrait ? Math.min(disp.w, disp.h) : Math.max(disp.w, disp.h);
-  const TH = toPortrait ? Math.max(disp.w, disp.h) : Math.min(disp.w, disp.h);
+  const TW = isPort ? Math.min(disp.w, disp.h) : Math.max(disp.w, disp.h);
+  const TH = isPort ? Math.max(disp.w, disp.h) : Math.min(disp.w, disp.h);
   const fsz = TH < 200 ? 14 : (TH < 400 ? 18 : 20);
   const footerH = Math.round(fsz * 1.8);
   const safeH = TH - footerH;
   const margin = Math.max(16, disp.margin || 32);
+
   const hasMulti = Object.keys(spec.pages || {}).length > 1;
   const edgeActive = spec.edge_nav !== false && hasMulti;
   const edgeW = edgeActive ? Math.round(TW * parseFloat(spec.edge_nav_ratio || 0.15)) : 0;
   const leftBound = Math.max(edgeW, margin);
   const rightBound = Math.min(TW - edgeW, TW - margin);
   const usableW = rightBound - leftBound;
+  const gap = usableW >= 900 ? 20 : (usableW >= 500 ? 16 : 12);
 
-  const tiles = list.filter(e => ["tile", "light_tile", "switch_tile", "climate_tile", "sensor_tile", "media_tile", "action_tile"].includes(e.type));
-  const widgets = list.filter(e => ["calendar_timeline", "weather_forecast", "flight_tracker", "flight_radar", "sports_racing", "sports_match"].includes(e.type));
-  const grids = list.filter(e => e.type === "dynamic_grid");
+  const cards = list.filter(e => e.type === "card");
   const icons = list.filter(e => e.type === "icon");
   const curves = list.filter(e => e.type === "curve");
   const lines = list.filter(e => e.type === "line");
   const numbers = list.filter(e => e.type === "number");
   const texts = list.filter(e => e.type === "text");
 
-  // Dynamic Grid reflow: full usable area
-  if (grids.length) {
-    grids.forEach(g => {
-      g.x = leftBound;
-      g.y = Math.round(TH * 0.04);
-      g.w = usableW;
-      g.h = safeH - Math.round(TH * 0.08);
+  // Identify children nested inside container cards
+  const cardChildren = new Map();
+  cards.forEach(c => cardChildren.set(c, []));
+  cards.forEach(c => {
+    const cx0 = c.x, cy0 = c.y, cx1 = c.x + c.w, cy1 = c.y + c.h;
+    list.forEach(e => {
+      if (e === c) return;
+      if (e.x >= cx0 - 10 && e.y >= cy0 - 10 && (e.x + e.w) <= cx1 + 10 && (e.y + e.h) <= cy1 + 10) {
+        cardChildren.get(c).push(e);
+      }
     });
-    return;
-  }
+  });
 
-  // Modern Tiles & Widgets Dashboard Reflow: Respect natural top-to-bottom order and headers
-  if (tiles.length || widgets.length) {
-    const gap = TW >= 1200 ? 20 : 14;
+  const allChildren = new Set();
+  cardChildren.forEach(children => children.forEach(child => allChildren.add(child)));
+  const topLevel = list.filter(e => !allChildren.has(e));
 
-    const topItemY = Math.min(
-      ...(tiles.length ? tiles.map(t => t.y) : [Infinity]),
-      ...(widgets.length ? widgets.map(w => w.y) : [Infinity])
-    );
-    const headerTexts = texts.filter(t => t.y < topItemY);
-    headerTexts.forEach(t => {
-      t.x = leftBound;
-      t.w = Math.min(t.w, usableW);
-    });
-    const headerIcons = icons.filter(ic => ic.y < topItemY);
-    headerIcons.forEach(ic => {
-      ic.x = rightBound - ic.w;
-    });
+  // 1. Reflow container cards & nested button rows
+  cards.forEach(c => {
+    if (allChildren.has(c)) return;
+    c.x = leftBound;
+    c.w = usableW;
 
-    let cursorY = headerTexts.length ? Math.max(...headerTexts.map(t => t.y + t.h)) + gap : Math.round(TH * 0.04);
+    const children = cardChildren.get(c) || [];
+    const cardButtons = children.filter(ch => ch.type === "button");
+    const cardTexts = children.filter(ch => ch.type === "text" || ch.type === "number");
 
-    const firstTileY = tiles.length ? Math.min(...tiles.map(t => t.y)) : Infinity;
-    const firstWidgetY = widgets.length ? Math.min(...widgets.map(w => w.y)) : Infinity;
-
-    if (firstTileY <= firstWidgetY) {
-      let cols = 1;
-      if (usableW >= 1200) cols = 4;
-      else if (usableW >= 880) cols = 3;
-      else if (usableW >= 540) cols = 2;
-      else cols = 1;
-
-      const tileW = Math.floor((usableW - (cols - 1) * gap) / cols);
-      const tileH = TW >= 1200 ? 150 : (TW >= 800 ? 138 : 124);
-
-      tiles.forEach((t, idx) => {
-        const col = idx % cols;
-        const row = Math.floor(idx / cols);
-        t.x = leftBound + col * (tileW + gap);
-        t.y = cursorY + row * (tileH + gap);
-        t.w = tileW;
-        t.h = tileH;
-      });
-      const tileRows = Math.ceil(tiles.length / cols);
-      cursorY += tileRows * (tileH + gap);
-
-      widgets.forEach(w => {
-        w.x = leftBound;
-        w.y = cursorY;
-        w.w = usableW;
-        if (w.type === "calendar_timeline") w.h = Math.min(360, Math.round(safeH * 0.38));
-        else if (w.type === "flight_tracker" || w.type === "flight_radar") w.h = Math.min(360, Math.round(safeH * 0.35));
-        else if (w.type === "sports_racing") w.h = Math.min(360, Math.round(safeH * 0.35));
-        else if (w.type === "sports_match") w.h = Math.min(300, Math.round(safeH * 0.28));
-        else w.h = Math.min(280, Math.round(safeH * 0.30));
-        cursorY += w.h + gap;
-      });
-    } else {
-      widgets.forEach(w => {
-        w.x = leftBound;
-        w.y = cursorY;
-        w.w = usableW;
-        if (w.type === "calendar_timeline") w.h = Math.min(360, Math.round(safeH * 0.38));
-        else if (w.type === "flight_tracker" || w.type === "flight_radar") w.h = Math.min(360, Math.round(safeH * 0.35));
-        else if (w.type === "sports_racing") w.h = Math.min(360, Math.round(safeH * 0.35));
-        else if (w.type === "sports_match") w.h = Math.min(300, Math.round(safeH * 0.28));
-        else w.h = Math.min(280, Math.round(safeH * 0.30));
-        cursorY += w.h + gap;
-      });
-
-      let cols = 1;
-      if (usableW >= 1200) cols = 4;
-      else if (usableW >= 880) cols = 3;
-      else if (usableW >= 540) cols = 2;
-      else cols = 1;
-
-      const tileW = Math.floor((usableW - (cols - 1) * gap) / cols);
-      const tileH = TW >= 1200 ? 150 : (TW >= 800 ? 138 : 124);
-
-      tiles.forEach((t, idx) => {
-        const col = idx % cols;
-        const row = Math.floor(idx / cols);
-        t.x = leftBound + col * (tileW + gap);
-        t.y = cursorY + row * (tileH + gap);
-        t.w = tileW;
-        t.h = tileH;
+    // Dock nested action buttons (+ / - / controls) to the right without collision
+    if (cardButtons.length > 0) {
+      const sortedBtns = [...cardButtons].sort((a, b) => a.x - b.x);
+      const btnGap = 16;
+      const totalBtnsW = sortedBtns.reduce((sum, b) => sum + (b.w || 140), 0) + (sortedBtns.length - 1) * btnGap;
+      let curBx = c.x + c.w - 36 - totalBtnsW;
+      sortedBtns.forEach(b => {
+        b.x = curBx;
+        curBx += (b.w || 140) + btnGap;
       });
     }
-    return;
+
+    cardTexts.forEach(txt => {
+      if (txt.x < c.x + c.w * 0.5) {
+        txt.x = c.x + 36;
+        txt.w = Math.min(txt.w || 400, c.w - 72);
+      }
+    });
+  });
+
+  // 2. Reflow top-level tiles into non-overlapping columns per row
+  const topTiles = topLevel.filter(e => ["tile", "light_tile", "switch_tile", "climate_tile", "sensor_tile", "media_tile", "action_tile"].includes(e.type));
+  if (topTiles.length > 0) {
+    const sortedTiles = [...topTiles].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    const rows = [];
+    let curRow = [];
+    sortedTiles.forEach(t => {
+      if (!curRow.length) {
+        curRow.push(t);
+      } else {
+        const prev = curRow[curRow.length - 1];
+        if (Math.abs(t.y - prev.y) <= 35) {
+          curRow.push(t);
+        } else {
+          rows.push(curRow);
+          curRow = [t];
+        }
+      }
+    });
+    if (curRow.length) rows.push(curRow);
+
+    // Each row evenly divides usableW with clean gap
+    rows.forEach(r => {
+      const n = r.length;
+      const tileW = Math.floor((usableW - (n - 1) * gap) / n);
+      r.sort((a, b) => a.x - b.x).forEach((t, idx) => {
+        t.x = leftBound + idx * (tileW + gap);
+        t.w = tileW;
+      });
+    });
   }
+
+  // 3. Reflow top-level widgets & dynamic grids across full usable width
+  const topWidgets = topLevel.filter(e => ["calendar_timeline", "weather_forecast", "flight_tracker", "flight_radar", "sports_racing", "sports_match", "dynamic_grid"].includes(e.type));
+  topWidgets.forEach(w => {
+    w.x = leftBound;
+    w.w = usableW;
+  });
+
+  // 4. Reflow headers and standalone texts
+  const topTexts = topLevel.filter(e => e.type === "text" || e.type === "number");
+  topTexts.forEach(txt => {
+    if (txt.align === "center" || (txt.w && txt.w >= 500)) {
+      txt.x = leftBound;
+      txt.w = usableW;
+    } else {
+      txt.x = leftBound;
+      txt.w = Math.min(txt.w || 400, usableW);
+    }
+  });
+
+  // 5. Top-right actions (Back buttons, navigation icons)
+  const topActions = topLevel.filter(e => (e.y < 120 && e.x > TW * 0.5) || (e.type === "button" && (e.label === "Back" || e.icon === "mdi:arrow-left")));
+  topActions.forEach(act => {
+    act.x = rightBound - (act.w || 64);
+  });
 
   // Clock page: single prominent time template + date
   const isClock = texts.some(t => String(t.value || "").includes("%H:%M") || String(t.value || "").includes("%I:%M"));
@@ -2254,12 +2218,13 @@ function reflowPageElements(p, toPortrait) {
 }
 
 
-function reflowCurrentPage() {
+async function reflowCurrentPage() {
   if (!cur || !page()) return;
   snapshot();
   reflowPageElements(page(), isPortrait());
   paint(); preview();
-  msg(`Reflowed "${cur}" for ${isPortrait() ? "Portrait" : "Landscape"}.`, { label: "Undo", run: undo });
+  await saveLayouts();
+  msg(`Reflowed "${cur}" into responsive grid.`, { label: "Undo", run: undo });
 }
 
 /* History */
@@ -4072,7 +4037,7 @@ if ($("edgenavbtn")) {
     snapshot();
     const willBeActive = spec.edge_nav === false;
     spec.edge_nav = willBeActive;
-    Object.values(spec.pages || {}).forEach(p => adaptElementsToEdgeNav(p, willBeActive));
+    Object.values(spec.pages || {}).forEach(p => reflowPageElements(p));
     syncOrientUI();
     paint(); preview();
     await saveLayouts();
