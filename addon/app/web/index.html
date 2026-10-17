@@ -1325,6 +1325,9 @@ aside {
           <button data-add="action_tile"><span class="icon">⚡</span><span>Action</span></button>
           <button data-add="calendar_timeline"><span class="icon">📅</span><span>Timeline</span></button>
           <button data-add="weather_forecast"><span class="icon">🌤️</span><span>Weather</span></button>
+          <button data-add="flight_tracker"><span class="icon">✈️</span><span>Radar</span></button>
+          <button data-add="sports_racing"><span class="icon">🏎️</span><span>F1 Racing</span></button>
+          <button data-add="sports_match"><span class="icon">⚽</span><span>Match</span></button>
           <button data-add="dynamic_grid"><span class="icon">🔲</span><span>Grid</span></button>
         </div>
         <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin:10px 0 6px 2px">Typography &amp; Accents</div>
@@ -2775,6 +2778,27 @@ document.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
     base.days = 5;
     base.radius = 20;
   }
+  if (t === "flight_tracker") {
+    base.w = maxW;
+    base.h = Math.min(360, Math.round(curH() * 0.35));
+    base.title = "Airspace Radar";
+    base.style = "split";
+    base.radius = 35;
+  }
+  if (t === "sports_racing") {
+    base.w = maxW;
+    base.h = Math.min(360, Math.round(curH() * 0.35));
+    base.series = "f1";
+    base.title = "Formula 1";
+    base.radius = 20;
+  }
+  if (t === "sports_match") {
+    base.w = maxW;
+    base.h = Math.min(300, Math.round(curH() * 0.28));
+    base.league = "soccer/eng.1";
+    base.title = "Live Match";
+    base.radius = 20;
+  }
   els().push(base); sel = els().length - 1; paint(); preview();
 });
 
@@ -3238,6 +3262,37 @@ function props() {
       f("days", "forecast days", "number", "5") +
       f("radius", "corner radius", "number", "20") +
       `<div class="chip">Displays multi-day forecast matrix with MDI weather icons and precipitation probabilities.</div>`;
+  } else if (el.type === "flight_tracker" || el.type === "flight_radar") {
+    h += `<div class="row"><label>style</label><select data-k="style">
+      <option value="split"${(el.style || "split") === "split" ? " selected" : ""}>Adaptive (Radar + Telemetry)</option>
+      <option value="radar"${el.style === "radar" ? " selected" : ""}>Radar Scope (Circular PPI)</option>
+      <option value="card"${el.style === "card" ? " selected" : ""}>Telemetry Card (Full Width)</option>
+    </select></div>` +
+      f("radius", "radar radius (km)", "number", "35") +
+      f("sub_index", "flight index", "number", "0") +
+      f("entity", "sensor entity", "text", "", "entities-dl") +
+      `<div class="chip">Live ADS-B flight telemetry powered by OpenSky Network relative to home zone coordinates.</div>`;
+  } else if (el.type === "sports_racing") {
+    h += f("series", "series code", "text", "f1") +
+      f("entity", "sensor entity", "text", "", "entities-dl") +
+      `<div class="chip">Live motorsport pit-wall leaderboard with Top 10 standings, tyre badges, and schedule countdown.</div>`;
+  } else if (el.type === "sports_match") {
+    h += `<div class="row"><label>league</label><select data-k="league">
+      <option value="soccer/eng.1"${(el.league || "soccer/eng.1") === "soccer/eng.1" ? " selected" : ""}>Premier League (EPL)</option>
+      <option value="soccer/uefa.champions"${el.league === "soccer/uefa.champions" ? " selected" : ""}>UEFA Champions League</option>
+      <option value="soccer/esp.1"${el.league === "soccer/esp.1" ? " selected" : ""}>La Liga</option>
+      <option value="soccer/ger.1"${el.league === "soccer/ger.1" ? " selected" : ""}>Bundesliga</option>
+      <option value="soccer/ita.1"${el.league === "soccer/ita.1" ? " selected" : ""}>Serie A</option>
+      <option value="soccer/usa.1"${el.league === "soccer/usa.1" ? " selected" : ""}>MLS</option>
+      <option value="basketball/nba"${el.league === "basketball/nba" ? " selected" : ""}>NBA Basketball</option>
+      <option value="football/nfl"${el.league === "football/nfl" ? " selected" : ""}>NFL Football</option>
+      <option value="baseball/mlb"${el.league === "baseball/mlb" ? " selected" : ""}>MLB Baseball</option>
+      <option value="hockey/nhl"${el.league === "hockey/nhl" ? " selected" : ""}>NHL Hockey</option>
+    </select></div>` +
+      f("team", "team filter", "text", "") +
+      f("entity", "sensor entity", "text", "", "entities-dl") +
+      f("sub_index", "match index", "number", "0") +
+      `<div class="chip">Live head-to-head match scoreboard with period clock, team stats, and goal scorers.</div>`;
   }
   h += "</div>";
 
@@ -4340,10 +4395,83 @@ const PRESET_ICONS = {
   clock: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
   dynamic_entities: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>`,
   calendar_timeline: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg>`,
-  weather_forecast: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>`
+  weather_forecast: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>`,
+  flight_radar: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/><path d="M12 3v18M3 12h18"/><path d="m14 10 4-4"/></svg>`,
+  flight_tracker: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>`,
+  sports_racing: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>`,
+  sports_match: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24M14.83 9.17l4.24-4.24M14.83 14.83l4.24 4.24M9.17 14.83l-4.24 4.24"/><circle cx="12" cy="12" r="3"/></svg>`
 };
 
 const PRESETS = [
+  {
+    id: "flight_radar",
+    title: "Airspace Radar Scope",
+    desc: "Tactical 360° circular PPI radar scope tracking live overhead aircraft in real time via OpenSky ADS-B telemetry.",
+    makeElements: () => [
+      {
+        type: "flight_tracker",
+        style: "radar",
+        radius: 35,
+        x: curMargin(),
+        y: 60,
+        w: curW() - curMargin() * 2,
+        h: Math.min(curW() - curMargin() * 2, Math.round(curH() * 0.44)),
+        title: "Airspace Radar"
+      }
+    ]
+  },
+  {
+    id: "flight_tracker",
+    title: "Flight Tracker & Telemetry",
+    desc: "High-resolution flight telemetry card showing overhead commercial flights with altitude, speed, heading, and climb rate.",
+    makeElements: () => [
+      {
+        type: "flight_tracker",
+        style: "split",
+        radius: 35,
+        x: curMargin(),
+        y: 60,
+        w: curW() - curMargin() * 2,
+        h: Math.min(360, Math.round(curH() * 0.35)),
+        title: "Flight Telemetry"
+      }
+    ]
+  },
+  {
+    id: "sports_racing",
+    title: "Formula 1 Pit-Wall",
+    desc: "Live motorsport leaderboard with Top 10 driver standings, tyre compounds, gap intervals, lap count, and Grand Prix countdown.",
+    makeElements: (ent) => [
+      {
+        type: "sports_racing",
+        series: "f1",
+        entity: ent || "",
+        x: curMargin(),
+        y: 60,
+        w: curW() - curMargin() * 2,
+        h: Math.min(360, Math.round(curH() * 0.35)),
+        title: "Formula 1"
+      }
+    ]
+  },
+  {
+    id: "sports_match",
+    title: "Live Sports Scoreboard",
+    desc: "Live head-to-head match scoreboard (Premier League, Champions League, NBA, NFL) with scores, clock, team stats, and goal scorers.",
+    makeElements: (ent) => [
+      {
+        type: "sports_match",
+        league: "soccer/eng.1",
+        team: "",
+        entity: ent || "",
+        x: curMargin(),
+        y: 60,
+        w: curW() - curMargin() * 2,
+        h: Math.min(300, Math.round(curH() * 0.28)),
+        title: "Match Scoreboard"
+      }
+    ]
+  },
   {
     id: "calendar_timeline",
     title: "Calendar Agenda & Timeline",

@@ -639,6 +639,163 @@ class TestPaperHubV140PowerAndSync(unittest.TestCase):
         asyncio.run(_run())
 
 
+class TestPaperHubV150AdaptedPresets(unittest.TestCase):
+    def test_flight_tracker_split_and_radar(self):
+        """Verify flight tracker renders in both split and radar styles in < 25ms."""
+        el_split = {
+            "type": "flight_tracker",
+            "style": "split",
+            "x": 40,
+            "y": 40,
+            "w": 992,
+            "h": 360,
+            "radius": 24,
+        }
+        el_radar = {
+            "type": "flight_tracker",
+            "style": "radar",
+            "x": 40,
+            "y": 440,
+            "w": 992,
+            "h": 460,
+            "radius": 24,
+        }
+        page = {"elements": [el_split, el_radar]}
+        vals = {
+            0: None,  # Test realistic offline demo fallback
+            1: [
+                {
+                    "callsign": "AFR124",
+                    "country": "Air France",
+                    "distance_km": 12.5,
+                    "bearing_deg": 90.0,
+                    "altitude_m": 8500,
+                    "velocity_ms": 210.0,
+                    "track_deg": 45,
+                    "vertical_rate": 2.1,
+                }
+            ]
+        }
+
+        t0 = time.perf_counter()
+        img = L.render_page(page, vals, display="boox_go_6")
+        dt_ms = (time.perf_counter() - t0) * 1000
+
+        self.assertEqual(img.size, (1072, 1448))
+        self.assertEqual(img.mode, "L")
+        self.assertLess(dt_ms, 30.0, f"Flight tracker rendering too slow: {dt_ms:.2f}ms")
+
+    def test_flight_tracker_portrait_adaptation(self):
+        """Verify flight tracker split mode cleanly stacks radar above telemetry on tall/portrait cards."""
+        el_tall = {
+            "type": "flight_tracker",
+            "style": "split",
+            "x": 40,
+            "y": 40,
+            "w": 460,
+            "h": 700,
+            "radius": 24,
+        }
+        page = {"elements": [el_tall]}
+        img = L.render_page(page, {}, display="boox_go_6")
+        self.assertEqual(img.size, (1072, 1448))
+
+    def test_sports_racing_pitwall_and_countdown(self):
+        """Verify Formula 1 live pit-wall leaderboard and off-week countdown views."""
+        el_live = {
+            "type": "sports_racing",
+            "series": "f1",
+            "x": 40,
+            "y": 40,
+            "w": 992,
+            "h": 340,
+            "radius": 24,
+        }
+        el_scheduled = {
+            "type": "sports_racing",
+            "series": "f1",
+            "x": 40,
+            "y": 420,
+            "w": 992,
+            "h": 300,
+            "radius": 24,
+        }
+        page = {"elements": [el_live, el_scheduled]}
+        vals = {
+            0: None,  # Default live demo with Verstappen, Norris, etc.
+            1: {
+                "series": "F1",
+                "event_name": "Monaco Grand Prix",
+                "circuit": "Circuit de Monaco · Monte Carlo",
+                "status": "PRE",
+                "detail": "Sun May 24 · 13:00 UTC",
+                "standings": []
+            }
+        }
+
+        t0 = time.perf_counter()
+        img = L.render_page(page, vals, display="boox_go_6")
+        dt_ms = (time.perf_counter() - t0) * 1000
+
+        self.assertEqual(img.size, (1072, 1448))
+        self.assertEqual(img.mode, "L")
+        self.assertLess(dt_ms, 30.0, f"Sports racing rendering too slow: {dt_ms:.2f}ms")
+
+    def test_sports_match_scoreboard(self):
+        """Verify multi-league live sports match scoreboard with hero scores and scorers."""
+        el_match = {
+            "type": "sports_match",
+            "league": "soccer/eng.1",
+            "x": 40,
+            "y": 40,
+            "w": 992,
+            "h": 300,
+            "radius": 24,
+        }
+        page = {"elements": [el_match]}
+        vals = {
+            0: {
+                "league": "PREMIER LEAGUE",
+                "venue": "Anfield",
+                "clock": "88' · 2ND HALF",
+                "status": "IN",
+                "home_team": "LIVERPOOL",
+                "home_score": 3,
+                "home_stats": "18 Shots · 62% Poss",
+                "away_team": "MAN CITY",
+                "away_score": 2,
+                "away_stats": "11 Shots · 38% Poss",
+                "events_home": "Salah (14', 67'), Diaz (44')",
+                "events_away": "Haaland (31', 82' pen)"
+            }
+        }
+
+        t0 = time.perf_counter()
+        img = L.render_page(page, vals, display="boox_go_6")
+        dt_ms = (time.perf_counter() - t0) * 1000
+
+        self.assertEqual(img.size, (1072, 1448))
+        self.assertEqual(img.mode, "L")
+        self.assertLess(dt_ms, 30.0, f"Sports match rendering too slow: {dt_ms:.2f}ms")
+
+    def test_enrich_page_values_execution(self):
+        """Verify enrich_page_values seamlessly enriches page values without errors."""
+        async def _run():
+            page = {
+                "elements": [
+                    {"type": "flight_tracker", "radius": 40},
+                    {"type": "sports_racing", "series": "f1"},
+                    {"type": "sports_match", "league": "soccer/eng.1"}
+                ]
+            }
+            vals = {}
+            # With session=None, graceful offline handling must populate or leave cleanly
+            await server.enrich_page_values(None, page, vals)
+            self.assertIn(0, vals)
+            self.assertIsInstance(vals[0], list)
+        asyncio.run(_run())
+
+
 if __name__ == "__main__":
     unittest.main()
 

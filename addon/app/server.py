@@ -276,6 +276,504 @@ async def resolve_templates(session, templates):
     return results
 
 
+_aircraft_cache = {"at": 0.0, "items": []}
+_home_location_cache = {"at": 0.0, "lat": 45.794, "lon": 21.222}
+_weather_cache = {}
+_calendar_cache = {}
+_racing_cache = {}
+_sports_match_cache = {}
+
+
+def _haversine_km(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2.0)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2.0)**2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return R * c
+
+
+def _bearing_calc(lat1, lon1, lat2, lon2):
+    y = math.sin(math.radians(lon2 - lon1)) * math.cos(math.radians(lat2))
+    x = math.cos(math.radians(lat1)) * math.sin(math.radians(lat2)) - math.sin(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.cos(math.radians(lon2 - lon1))
+    deg = (math.degrees(math.atan2(y, x)) + 360) % 360
+    cardinals = ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "N"]
+    idx = int((deg + 22.5) // 45)
+    return deg, cardinals[idx]
+
+
+async def get_home_coordinates(session):
+    now = time.time()
+    if now - _home_location_cache["at"] < 3600 and _home_location_cache["lat"] is not None:
+        return _home_location_cache["lat"], _home_location_cache["lon"]
+    if HA_TOKEN and session:
+        try:
+            zone_state = await ha_json(session, "/states/zone.home")
+            attrs = zone_state.get("attributes", {})
+            lat = float(attrs.get("latitude"))
+            lon = float(attrs.get("longitude"))
+            _home_location_cache["at"] = now
+            _home_location_cache["lat"] = lat
+            _home_location_cache["lon"] = lon
+            return lat, lon
+        except Exception:
+            pass
+    return _home_location_cache["lat"], _home_location_cache["lon"]
+
+
+async def fetch_overhead_aircraft(session, radius_km=35.0):
+    now = time.time()
+    if now - _aircraft_cache["at"] < 45.0 and _aircraft_cache["items"] is not None:
+        return _aircraft_cache["items"]
+
+    lat, lon = await get_home_coordinates(session)
+    radius_km = max(5.0, min(150.0, float(radius_km or 35.0)))
+    d_lat = radius_km / 111.0
+    cos_lat = max(0.01, math.cos(math.radians(lat)))
+    d_lon = radius_km / (111.0 * cos_lat)
+
+    url = (
+        f"https://opensky-network.org/api/states/all"
+        f"?lamin={lat - d_lat:.4f}&lamax={lat + d_lat:.4f}"
+        f"&lomin={lon - d_lon:.4f}&lomax={lon + d_lon:.4f}"
+    )
+    headers = {"User-Agent": "PaperHub/1.5.0 (HomeAssistant Addon)"}
+    timeout = aiohttp.ClientTimeout(total=8)
+    try:
+        if not session:
+            return _aircraft_cache["items"]
+        async with session.get(url, headers=headers, timeout=timeout) as r:
+            if r.status != 200:
+                return _aircraft_cache["items"]
+            data = await r.json()
+            raw_states = data.get("states") or []
+            aircraft = []
+            for s in raw_states:
+                if not s or len(s) < 12 or s[8] is True:
+                    continue
+                a_lon, a_lat = s[5], s[6]
+                if a_lon is None or a_lat is None:
+                    continue
+                dist = _haversine_km(lat, lon, a_lat, a_lon)
+                if dist > radius_km:
+                    continue
+                b_deg, cardinal = _bearing_calc(lat, lon, a_lat, a_lon)
+                cs = str(s[1]).strip() if s[1] else str(s[0]).upper()
+                aircraft.append({
+                    "icao24": str(s[0]).upper(),
+                    "callsign": cs,
+                    "country": str(s[2] or "Commercial"),
+                    "latitude": a_lat,
+                    "longitude": a_lon,
+                    "altitude_m": float(s[7]) if s[7] is not None else 0.0,
+                    "velocity_ms": float(s[9]) if s[9] is not None else 0.0,
+                    "track_deg": float(s[10]) if s[10] is not None else 0.0,
+                    "vertical_rate": float(s[11]) if s[11] is not None else 0.0,
+                    "distance_km": round(dist, 1),
+                    "bearing_deg": round(b_deg, 1),
+                    "bearing_cardinal": cardinal
+                })
+            aircraft.sort(key=lambda a: a["distance_km"])
+            _aircraft_cache["at"] = now
+            _aircraft_cache["items"] = aircraft
+            return aircraft
+    except Exception as exc:
+        print(f"fetch_overhead_aircraft error: {exc!r}", flush=True)
+        return _aircraft_cache["items"]
+
+
+async def fetch_weather_forecast(session, entity_id, fallback=None):
+    eid = str(entity_id or "weather.home").strip()
+    now = time.time()
+    cached = _weather_cache.get(eid)
+    if cached and (now - cached["at"] < 600):
+        return cached["data"]
+
+    base_data = {}
+    if isinstance(fallback, dict):
+        base_data = dict(fallback)
+    elif isinstance(fallback, str) and fallback.strip():
+        try:
+            base_data = json.loads(fallback)
+        except Exception:
+            pass
+
+    if HA_TOKEN and session:
+        try:
+            svc_res = await ha_json(
+                session,
+                "/services/weather/get_forecasts?return_response=true",
+                method="POST",
+                json={"entity_id": eid, "type": "daily"}
+            )
+            forecast_items = []
+            if isinstance(svc_res, dict) and eid in svc_res:
+                forecast_items = svc_res[eid].get("forecast") or []
+            elif isinstance(svc_res, dict) and "response" in svc_res:
+                forecast_items = svc_res["response"].get(eid, {}).get("forecast") or []
+
+            if forecast_items:
+                base_data["forecast"] = forecast_items
+        except Exception:
+            pass
+
+    _weather_cache[eid] = {"at": now, "data": base_data}
+    return base_data
+
+
+async def fetch_calendar_events(session, entity_id, days=14, fallback=None):
+    raw_eid = str(entity_id or "calendar.personal").strip()
+    now = time.time()
+    cached = _calendar_cache.get(raw_eid)
+    if cached and (now - cached["at"] < 300):
+        return cached["data"]
+
+    if not HA_TOKEN or not session:
+        return fallback
+
+    eids = [e.strip() for e in raw_eid.split(",") if e.strip()]
+    st_iso = datetime.now().isoformat()
+    end_iso = (datetime.now() + timedelta(days=days)).isoformat()
+    all_events = []
+
+    try:
+        for eid in eids:
+            try:
+                url_path = f"/calendars/{eid}?start={st_iso}&end={end_iso}"
+                payload = await ha_json(session, url_path)
+                cal_events = payload if isinstance(payload, list) else (payload.get("events") if isinstance(payload, dict) else [])
+                short_badge = eid.replace("calendar.", "").upper()[:4]
+                for ev in (cal_events or []):
+                    ev_copy = dict(ev)
+                    ev_copy["calendar"] = eid
+                    ev_copy["cal_badge"] = short_badge
+                    all_events.append(ev_copy)
+            except Exception:
+                pass
+
+        def _event_key(ev):
+            raw_st = ev.get("start") or ev.get("start_time") or ""
+            return str(raw_st)
+
+        all_events.sort(key=_event_key)
+        _calendar_cache[raw_eid] = {"at": now, "data": {"events": all_events}}
+        return {"events": all_events}
+    except Exception as exc:
+        print(f"fetch_calendar_events error: {exc!r}", flush=True)
+        return fallback
+
+
+async def fetch_racing_data(session, entity_or_series="f1", fallback=None):
+    now = time.time()
+    raw_key = str(entity_or_series or "f1").strip().lower()
+
+    # 1. Approach A: Check if fallback is a resolved template from HA entity (e.g. sensor.f1)
+    base_data = None
+    if isinstance(fallback, dict):
+        base_data = fallback
+    elif isinstance(fallback, str) and fallback.strip():
+        try:
+            base_data = json.loads(fallback)
+        except Exception:
+            pass
+
+    ha_event_name = ""
+    ha_status = ""
+    ha_circuit = ""
+    ha_date = ""
+    if isinstance(base_data, dict) and "attributes" in base_data:
+        attrs = base_data.get("attributes") or {}
+        ha_status = str(base_data.get("state") or "").upper()
+        ha_event_name = attrs.get("event_name") or attrs.get("event") or ""
+        ha_circuit = attrs.get("venue") or attrs.get("circuit") or ""
+        ha_date = attrs.get("date") or ""
+        if attrs.get("standings"):
+            return {
+                "series": "F1",
+                "event_name": ha_event_name or "Formula 1 Grand Prix",
+                "circuit": ha_circuit or "Grand Prix Circuit",
+                "status": ha_status or "IN",
+                "lap": attrs.get("lap"),
+                "total_laps": attrs.get("total_laps"),
+                "clock": attrs.get("clock") or ha_status,
+                "standings": attrs.get("standings")
+            }
+
+    # 2. Check in-memory cache
+    cached = _racing_cache.get(raw_key)
+    if cached and (now - cached["at"] < (60.0 if cached.get("is_live") else 600.0)):
+        return cached["data"]
+
+    # 3. Approach B: Query ESPN F1 scoreboard
+    f1_url = "https://site.api.espn.com/apis/site/v2/sports/racing/f1/scoreboard"
+    headers = {"User-Agent": "PaperHub/1.5.0 (HomeAssistant Addon)"}
+    timeout = aiohttp.ClientTimeout(total=6)
+
+    event_data = {
+        "series": "F1",
+        "event_name": ha_event_name or "Formula 1 Grand Prix",
+        "circuit": ha_circuit or "Grand Prix Circuit",
+        "detail": "Upcoming Grand Prix Session",
+        "status": ha_status or "PRE",
+        "standings": []
+    }
+    is_live = False
+
+    try:
+        if not session:
+            return event_data
+        async with session.get(f1_url, headers=headers, timeout=timeout) as r:
+            if r.status == 200:
+                data = await r.json()
+                events = data.get("events") or []
+                if events:
+                    ev = events[0]
+                    ev_name = ev.get("name") or ha_event_name or "Formula 1 Grand Prix"
+                    circuit_info = ev.get("circuit") or {}
+                    c_name = circuit_info.get("fullName") or ha_circuit or "Grand Prix Circuit"
+                    c_addr = circuit_info.get("address", {})
+                    c_city = c_addr.get("city") or ""
+                    circuit_str = f"{c_name} · {c_city}" if c_city else c_name
+                    st_desc = ev.get("status", {}).get("type", {}).get("description") or "Scheduled"
+                    st_state = ev.get("status", {}).get("type", {}).get("state") or "pre"
+                    is_live = (st_state == "in" or "progress" in st_desc.lower())
+
+                    date_iso = ev.get("date") or ha_date
+                    detail_str = f"Status: {st_desc}"
+                    if date_iso:
+                        try:
+                            dt = datetime.fromisoformat(date_iso.replace("Z", "+00:00"))
+                            detail_str = dt.strftime("%a %b %d · %H:%M UTC")
+                        except Exception:
+                            detail_str = f"{st_desc} · {str(date_iso)[:10]}"
+
+                    event_data = {
+                        "series": "F1",
+                        "event_name": ev_name,
+                        "circuit": circuit_str,
+                        "detail": detail_str,
+                        "status": "IN" if is_live else ("POST" if st_state == "post" else "PRE"),
+                        "clock": st_desc,
+                        "standings": []
+                    }
+
+                    comps = (ev.get("competitions") or [{}])[0].get("competitors") or []
+                    if comps:
+                        parsed_standings = []
+                        for idx, c in enumerate(comps[:10]):
+                            ath = c.get("athlete") or {}
+                            tm = c.get("team") or {}
+                            code = ath.get("abbreviation") or ath.get("shortName") or "DRV"
+                            team_name = tm.get("displayName") or tm.get("shortDisplayName") or ""
+                            gap_val = c.get("status", {}).get("displayValue") or ("LEADER" if idx == 0 else "")
+                            parsed_standings.append({
+                                "pos": idx + 1,
+                                "driver": str(code)[:3].upper(),
+                                "team": team_name,
+                                "gap": gap_val,
+                                "tyre": "M"
+                            })
+                        if parsed_standings:
+                            event_data["standings"] = parsed_standings
+
+        _racing_cache[raw_key] = {"at": now, "data": event_data, "is_live": is_live}
+        return event_data
+    except Exception as exc:
+        print(f"fetch_racing_data error: {exc!r}", flush=True)
+        return _racing_cache.get(raw_key, {}).get("data") or event_data
+
+
+def _parse_espn_event(ev, league_title="MATCH"):
+    comp = (ev.get("competitions") or [{}])[0]
+    competitors = comp.get("competitors") or []
+    home = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0] if competitors else {})
+    away = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1] if len(competitors) > 1 else {})
+
+    st_type = comp.get("status", {}).get("type", {})
+    st_state = st_type.get("state") or "pre"
+    st_desc = st_type.get("description") or st_type.get("detail") or "Scheduled"
+    clock_val = comp.get("status", {}).get("displayClock")
+    is_live = (st_state == "in")
+
+    clock_badge = f"{clock_val} · {st_desc}" if (clock_val and clock_val != "0'" and is_live) else st_desc
+    venue_title = comp.get("venue", {}).get("fullName") or ""
+
+    home_id = str(home.get("team", {}).get("id") or "")
+    events_home = []
+    events_away = []
+    for dt in comp.get("details", []):
+        t_txt = dt.get("type", {}).get("text") or ""
+        clk = dt.get("clock", {}).get("displayValue") or ""
+        athletes = dt.get("athletesInvolved") or []
+        p_name = athletes[0].get("displayName") if athletes else ""
+        if p_name and ("Goal" in t_txt or "Point" in t_txt or "Touchdown" in t_txt or "Home Run" in t_txt):
+            entry_str = f"{p_name} ({clk})" if clk else p_name
+            if str(dt.get("team", {}).get("id") or "") == home_id:
+                events_home.append(entry_str)
+            else:
+                events_away.append(entry_str)
+
+    return {
+        "league": league_title,
+        "venue": venue_title,
+        "clock": clock_badge,
+        "status": st_state.upper(),
+        "is_live": is_live,
+        "home_team": home.get("team", {}).get("displayName") or home.get("team", {}).get("shortDisplayName") or "HOME",
+        "home_score": home.get("score") if home.get("score") is not None else "-",
+        "home_stats": (home.get("records") or [{}])[0].get("summary", ""),
+        "away_team": away.get("team", {}).get("displayName") or away.get("team", {}).get("shortDisplayName") or "AWAY",
+        "away_score": away.get("score") if away.get("score") is not None else "-",
+        "away_stats": (away.get("records") or [{}])[0].get("summary", ""),
+        "events_home": ", ".join(events_home[:3]),
+        "events_away": ", ".join(events_away[:3])
+    }
+
+
+async def fetch_sports_match(session, entity_or_league="soccer/eng.1", team=None, fallback=None):
+    now = time.time()
+    raw_input = str(entity_or_league or "soccer/eng.1").strip()
+    cache_key = f"{raw_input}:{str(team or '').lower()}"
+
+    # 1. Approach A: Check if fallback is a resolved HA entity from ha-teamtracker
+    base_data = None
+    if isinstance(fallback, dict):
+        base_data = fallback
+    elif isinstance(fallback, str) and fallback.strip():
+        try:
+            base_data = json.loads(fallback)
+        except Exception:
+            pass
+
+    if isinstance(base_data, dict) and "attributes" in base_data:
+        attrs = base_data.get("attributes") or {}
+        home = attrs.get("team_name") or attrs.get("team_abbr") or "HOME"
+        away = attrs.get("opponent_name") or attrs.get("opponent_abbr") or "AWAY"
+        h_score = attrs.get("team_score")
+        a_score = attrs.get("opponent_score")
+        st = str(base_data.get("state") or "PRE").upper()
+        clock_str = attrs.get("clock") or attrs.get("quarter") or attrs.get("period") or st
+        last_play = attrs.get("last_play") or ""
+        down_dist = attrs.get("down_distance_text") or ""
+        venue = attrs.get("venue") or ""
+        league_name = attrs.get("league") or "MATCH"
+        return [{
+            "league": league_name,
+            "venue": venue,
+            "clock": clock_str,
+            "status": st,
+            "home_team": home,
+            "home_score": h_score if h_score is not None else "-",
+            "home_stats": down_dist,
+            "away_team": away,
+            "away_score": a_score if a_score is not None else "-",
+            "away_stats": "",
+            "events_home": last_play,
+            "events_away": ""
+        }]
+
+    # 2. Check in-memory cache
+    cached = _sports_match_cache.get(cache_key)
+    if cached and (now - cached["at"] < (30.0 if cached.get("is_live") else 300.0)):
+        return cached["data"]
+
+    # 3. Approach B: Map friendly league names to ESPN endpoint
+    league_map = {
+        "premier_league": "soccer/eng.1",
+        "epl": "soccer/eng.1",
+        "champions_league": "soccer/uefa.champions",
+        "ucl": "soccer/uefa.champions",
+        "la_liga": "soccer/esp.1",
+        "bundesliga": "soccer/ger.1",
+        "serie_a": "soccer/ita.1",
+        "mls": "soccer/usa.1",
+        "nba": "basketball/nba",
+        "wnba": "basketball/wnba",
+        "nfl": "football/nfl",
+        "college_football": "football/college-football",
+        "mlb": "baseball/mlb",
+        "nhl": "hockey/nhl"
+    }
+    slug = raw_input.lower().replace("-", "_").replace(" ", "_")
+    endpoint_path = league_map.get(slug, raw_input)
+    if "/" not in endpoint_path:
+        endpoint_path = f"soccer/{endpoint_path}"
+
+    url = f"https://site.api.espn.com/apis/site/v2/sports/{endpoint_path}/scoreboard"
+    headers = {"User-Agent": "PaperHub/1.5.0 (HomeAssistant Addon)"}
+    timeout = aiohttp.ClientTimeout(total=6)
+
+    try:
+        if not session:
+            return cached["data"] if cached else None
+        async with session.get(url, headers=headers, timeout=timeout) as r:
+            if r.status != 200:
+                return cached["data"] if cached else None
+            data = await r.json()
+            events = data.get("events") or []
+            if not events:
+                return cached["data"] if cached else None
+
+            league_title = (data.get("leagues") or [{}])[0].get("name") or "MATCH"
+            parsed_matches = [_parse_espn_event(ev, league_title) for ev in events]
+
+            if team:
+                query = str(team).lower().strip()
+                matched, others = [], []
+                for m in parsed_matches:
+                    if (query in m["home_team"].lower() or query in m["away_team"].lower()):
+                        matched.append(m)
+                    else:
+                        others.append(m)
+                parsed_matches = matched + others
+            else:
+                def _st_sort(m):
+                    st = m.get("status", "")
+                    if st == "IN": return 0
+                    if st == "PRE": return 1
+                    return 2
+                parsed_matches.sort(key=_st_sort)
+
+            is_any_live = any(m.get("is_live") for m in parsed_matches)
+            _sports_match_cache[cache_key] = {"at": now, "data": parsed_matches, "is_live": is_any_live}
+            return parsed_matches
+    except Exception as exc:
+        print(f"fetch_sports_match error: {exc!r}", flush=True)
+        return cached["data"] if cached else None
+
+
+async def enrich_page_values(session, page, vals):
+    """Enrich resolved page values with live external/extended data if needed."""
+    for i, el in enumerate(page.get("elements", [])):
+        t = el.get("type")
+        if t == "weather_forecast":
+            wdata = await fetch_weather_forecast(session, el.get("entity", "weather.home"), fallback=vals.get(i))
+            if wdata:
+                vals[i] = wdata
+        elif t == "calendar_timeline":
+            cal_ent = el.get("entity")
+            if cal_ent:
+                cal_data = await fetch_calendar_events(session, cal_ent, days=14, fallback=vals.get(i))
+                if cal_data:
+                    vals[i] = cal_data
+        elif t in ("flight_tracker", "flight_radar"):
+            radius = float(el.get("radius") or 35)
+            fl_data = await fetch_overhead_aircraft(session, radius_km=radius)
+            if fl_data is not None:
+                vals[i] = fl_data
+        elif t == "sports_racing":
+            entity_or_series = el.get("entity") or el.get("series") or "f1"
+            race_data = await fetch_racing_data(session, entity_or_series, fallback=vals.get(i))
+            if race_data:
+                vals[i] = race_data
+        elif t == "sports_match":
+            entity_or_league = el.get("entity") or el.get("league") or "soccer/eng.1"
+            team = el.get("team")
+            match_data = await fetch_sports_match(session, entity_or_league, team=team, fallback=vals.get(i))
+            if match_data:
+                vals[i] = match_data
+
+
 def _png(img) -> bytes:
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
@@ -407,7 +905,9 @@ def page_has_entity(page: dict, entity_id: str) -> bool:
                     return True
         val = str(el.get("value") or "")
         sub = str(el.get("subtitle") or "")
-        if eid in val or eid in sub:
+        series = str(el.get("series") or "")
+        league = str(el.get("league") or "")
+        if eid in val or eid in sub or eid in series or eid in league:
             return True
     return False
 
@@ -469,6 +969,7 @@ async def render_device_frame(session, dev: DeviceSession, spec: dict) -> bytes:
     page = pages[dev.active_page]
     templates = layout.collect_templates(page)
     vals = await resolve_templates(session, templates) if templates else {}
+    await enrich_page_values(session, page, vals)
 
     clock_str = datetime.now().strftime("%-I:%M %p")
     page_info = {
@@ -907,6 +1408,7 @@ async def api_preview(request):
 
         templates = layout.collect_templates(page)
         vals = await resolve_templates(SHARED_SESSION, templates) if templates else {}
+        await enrich_page_values(SHARED_SESSION, page, vals)
 
         clock_str = datetime.now().strftime("%-I:%M %p")
         page_info = data.get("page_info")

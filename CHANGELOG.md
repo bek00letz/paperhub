@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.5.0 - Airspace Radar, Flight Telemetry, Formula 1 Pit-Wall & Live Sports Scoreboards
+
+- **Overhead Airspace Radar & Flight Telemetry (`flight_tracker` / `flight_radar`)**:
+  - **Tactical 360° Circular PPI Radar Scope**: Concentric range rings, cardinal heading labels (N, E, S, W), range scale indicators, and directional aircraft chevrons rotated to real-time `track_deg` heading, with a targeted corner reticle around the closest or selected aircraft.
+  - **Full Commercial Telemetry Card**: High-contrast metrics card displaying callsign, airline/country, altitude with dynamic climb/descent arrow (`↑`, `↓`, `→`), ground speed, heading, and ADS-B squawk/ICAO.
+  - **Orientation-Adaptive Split Layout**:
+    - **Landscape / Wide cards ($w \ge 1.15 \times h$)**: Radar scope on the left ($\sim 40\%$ width) with telemetry card on the right.
+    - **Portrait / Tall cards ($h > w$)**: Radar scope on the top ($\sim 48\%$ height) with telemetry card on the bottom, perfectly adapted for portrait readers like Onyx Boox Go 6 (1072 × 1448).
+  - **Live Geodesic ADS-B Tracking**: Queries the OpenSky Network API relative to the Home Assistant `zone.home` coordinates with configurable radius, distance sorting, and caching.
+- **Formula 1 & Motorsport Live Pit-Wall (`sports_racing`)**:
+  - **Live Leaderboard**: Real-time Top 10 driver standings with position badges (`P1`), driver codes (`VER`, `NOR`), team names, gap intervals (`LEADER`, `+2.1s`), tyre compound badges (`[S]`, `[M]`, `[H]`, `[I]`, `[W]`), and lap count (`LAP 42/53`).
+  - **Responsive Column Architecture**: 2-column leaderboard for cards with $w \ge 520\text{px}$; 1-column leaderboard for narrow cards.
+  - **Off-Week & Pre-Race Session Countdown**: Clean ambient view showing circuit name, location, and upcoming Grand Prix session date/time.
+  - **Data Sources**: Integrates with ESPN F1 scoreboard API and Home Assistant `sensor.f1`.
+- **Live Multi-League Sports Scoreboards (`sports_match`)**:
+  - **Head-to-Head Hero Presentation**: Bold score display (`2 — 1`), home and away team names, match stats (shots, possession, records, down & distance), and period clock/status badge (`74' · 2ND HALF`, `FINAL`).
+  - **Match Highlights & Scorers**: Chronological goal scorers and key play ticker at the base of the card.
+  - **Multi-League Support**: Built-in support for Premier League (EPL), UEFA Champions League, La Liga, Bundesliga, Serie A, MLS, NBA Basketball, NFL Football, MLB Baseball, NHL Hockey, and Home Assistant `ha-teamtracker` sensors.
+- **Visual Editor & Template Presets**:
+  - Added dedicated quick-add toolbar buttons for Radar (`✈️`), F1 Racing (`🏎️`), and Match (`⚽`).
+  - Added full inspector property controls for style selection, radar radius, racing series, league pickers, and entity overrides.
+  - Added 4 rich template cards to the Preset Library: *Airspace Radar Scope*, *Flight Tracker & Telemetry*, *Formula 1 Pit-Wall*, and *Live Sports Scoreboard*.
+- **Automated Test Suite**:
+  - Added 5 new automated tests verifying radar scope, portrait split adaptation, F1 pit-wall, live match scoreboards, and seamless offline data enrichment (27 total tests, 100% passing in <0.3s).
+
 ## 1.4.0 - Ultra-Low-Power Architecture, Power & Sync Profiles, and Smart Selective Push
 
 - **Adaptive Power & Sync Architecture**:

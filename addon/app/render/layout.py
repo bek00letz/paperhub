@@ -857,6 +857,564 @@ def _draw_weather_forecast(img, draw, el, val, display=None):
                 draw.text((mid_x, precip_y), f"💧{precip_val}%", font=f_p, fill=T.GRAY_MID, anchor="mb")
 
 
+
+_CARDINAL_DEG = {
+    'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5, 'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5,
+    'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5, 'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5
+}
+
+
+def _parse_val_json(raw_val):
+    if isinstance(raw_val, (dict, list)):
+        return raw_val
+    if isinstance(raw_val, str) and raw_val.strip().startswith(("{", "[")):
+        try:
+            return json.loads(raw_val)
+        except Exception:
+            pass
+    return None
+
+
+def _draw_radar_scope(d, sx, sy, sw, sh, max_r_km, ac_list, tracked_cs=""):
+    cx = sx + sw // 2
+    cy = sy + sh // 2
+    r_scope = max(30, min(sw, sh) // 2 - 14)
+
+    # Concentric Range Rings
+    d.ellipse([(cx - r_scope, cy - r_scope), (cx + r_scope, cy + r_scope)], outline=T.BLACK, width=2)
+    mid_r = int(r_scope * 0.5)
+    d.ellipse([(cx - mid_r, cy - mid_r), (cx + mid_r, cy + mid_r)], outline=T.GRAY_BORDER, width=1)
+    inner_r = int(r_scope * 0.25)
+    d.ellipse([(cx - inner_r, cy - inner_r), (cx + inner_r, cy + inner_r)], outline=T.GRAY_SURFACE, width=1)
+
+    # Crosshairs
+    d.line([(cx - r_scope, cy), (cx + r_scope, cy)], fill=T.GRAY_BORDER, width=1)
+    d.line([(cx, cy - r_scope), (cx, cy + r_scope)], fill=T.GRAY_BORDER, width=1)
+    # Center Home marker
+    d.ellipse([(cx - 4, cy - 4), (cx + 4, cy + 4)], fill=T.BLACK)
+    d.ellipse([(cx - 2, cy - 2), (cx + 2, cy + 2)], fill=T.WHITE)
+
+    # Cardinal labels
+    cf = T.font(max(9, min(14, int(r_scope * 0.11))), bold=True)
+    d.text((cx, cy - r_scope + 10), "N", font=cf, fill=T.BLACK, anchor="mm")
+    d.text((cx + r_scope - 10, cy), "E", font=cf, fill=T.BLACK, anchor="mm")
+    d.text((cx, cy + r_scope - 10), "S", font=cf, fill=T.BLACK, anchor="mm")
+    d.text((cx - r_scope + 10, cy), "W", font=cf, fill=T.BLACK, anchor="mm")
+
+    # Range scale label
+    rf = T.font(max(8, min(12, int(r_scope * 0.09))), bold=True)
+    d.text((cx + mid_r + 4, cy - 6), f"{int(max_r_km // 2)}km", font=rf, fill=T.GRAY_DARK, anchor="lm")
+
+    # Plot aircraft blips
+    for ac in ac_list[:8]:
+        d_km = float(ac.get("distance_km") or 0.0)
+        b_deg = ac.get("bearing_deg")
+        if b_deg is None:
+            b_deg = _CARDINAL_DEG.get(ac.get("bearing_cardinal", "N"), 0.0)
+
+        norm_r = min(1.0, max(0.04, d_km / float(max_r_km or 35.0)))
+        pix_r = norm_r * (r_scope - 8)
+        rad = math.radians(b_deg)
+        px = int(cx + pix_r * math.sin(rad))
+        py = int(cy - pix_r * math.cos(rad))
+
+        cs = str(ac.get("callsign") or ac.get("icao24") or "").strip().upper()
+        is_tracked = (cs == tracked_cs) or (not tracked_cs and ac == ac_list[0])
+
+        # Directional airplane chevron
+        track = float(ac.get("track_deg") or 0.0)
+        t_rad = math.radians(track)
+        plen = 10 if is_tracked else 7
+        pwid = 7 if is_tracked else 4
+        pts = [(0, -plen), (pwid, plen * 0.7), (0, plen * 0.3), (-pwid, plen * 0.7)]
+        cos_t, sin_t = math.cos(t_rad), math.sin(t_rad)
+        rot_pts = [(px + int(lx * cos_t - ly * sin_t), py + int(lx * sin_t + ly * cos_t)) for lx, ly in pts]
+        d.polygon(rot_pts, fill=T.BLACK)
+
+        if is_tracked:
+            sz = 14
+            d.line([(px - sz, py - sz), (px - sz + 5, py - sz)], fill=T.BLACK, width=1)
+            d.line([(px - sz, py - sz), (px - sz, py - sz + 5)], fill=T.BLACK, width=1)
+            d.line([(px + sz, py - sz), (px + sz - 5, py - sz)], fill=T.BLACK, width=1)
+            d.line([(px + sz, py - sz), (px + sz, py - sz + 5)], fill=T.BLACK, width=1)
+            d.line([(px - sz, py + sz), (px - sz + 5, py + sz)], fill=T.BLACK, width=1)
+            d.line([(px - sz, py + sz), (px - sz, py + sz - 5)], fill=T.BLACK, width=1)
+            d.line([(px + sz, py + sz), (px + sz - 5, py + sz)], fill=T.BLACK, width=1)
+            d.line([(px + sz, py + sz), (px + sz, py + sz - 5)], fill=T.BLACK, width=1)
+
+        if cs:
+            lx = px + 11 if px >= cx else px - 11
+            anchor = "lm" if px >= cx else "rm"
+            cs_f = T.font(max(9, min(13, int(r_scope * 0.1))), bold=True)
+            d.text((lx, py - 6), cs, font=cs_f, fill=T.BLACK, anchor=anchor)
+
+
+def _draw_flight_tracker(img, draw, el, raw_val, display=None):
+    """Draw tactical overhead flight radar & telemetry card with Apple polish."""
+    x, y, w, h = _clamp_box(el, default_w=800, default_h=340, display=display)
+    radius = int(el.get("radius", 20))
+    style = str(el.get("style") or "split").lower()
+
+    # Outer Container
+    T.draw_card(draw, [(x, y), (x + w, y + h)], radius=radius, fill=T.WHITE, outline=T.GRAY_BORDER, shadow=True)
+
+    aircraft_list = []
+    val_parsed = _parse_val_json(raw_val)
+    if isinstance(val_parsed, list):
+        aircraft_list = [a for a in val_parsed if isinstance(a, dict)]
+    elif isinstance(val_parsed, dict) and "aircraft" in val_parsed:
+        aircraft_list = [a for a in val_parsed["aircraft"] if isinstance(a, dict)]
+    elif isinstance(val_parsed, dict) and val_parsed.get("callsign"):
+        aircraft_list = [val_parsed]
+
+    # Offline realistic fallback for instant visual preview
+    if not aircraft_list and raw_val is None:
+        aircraft_list = [
+            {
+                "callsign": "BAW71LK",
+                "country": "United Kingdom • British Airways",
+                "icao24": "40089A",
+                "distance_km": 8.4,
+                "bearing_deg": 225.0,
+                "bearing_cardinal": "SW",
+                "altitude_m": 10370,
+                "velocity_ms": 233.2,
+                "track_deg": 302,
+                "vertical_rate": 0.0,
+            },
+            {
+                "callsign": "THY41Y",
+                "country": "Turkey • Turkish Airlines",
+                "icao24": "4BA982",
+                "distance_km": 19.2,
+                "bearing_deg": 45.0,
+                "bearing_cardinal": "NE",
+                "altitude_m": 11887,
+                "velocity_ms": 253.3,
+                "track_deg": 140,
+                "vertical_rate": -1.5,
+            },
+        ]
+
+    scan_r = float(el.get("radius") or 35.0)
+
+    if not aircraft_list:
+        mid_x = x + w // 2
+        mid_y = y + h // 2
+        _draw_icon_glyph(draw, "mdi:radar", mid_x, mid_y - 24, 52, color=T.BLACK)
+        draw.text((mid_x, mid_y + 16), "AIRSPACE CLEAR", font=T.font(18, bold=True), fill=T.BLACK, anchor="mm")
+        draw.text((mid_x, mid_y + 38), f"No aircraft overhead within {int(scan_r)} km", font=T.font(13, bold=False), fill=T.GRAY_MUTED, anchor="mm")
+        return
+
+    sub_idx = int(el.get("sub_index", 0))
+    sub_total = len(aircraft_list)
+    if sub_idx >= sub_total:
+        sub_idx = 0
+
+    ac = aircraft_list[sub_idx]
+    callsign = str(ac.get("callsign") or ac.get("icao24") or "UNKNOWN").strip().upper()
+    country = ac.get("country") or "Commercial Flight"
+    dist_km = float(ac.get("distance_km") or 0.0)
+    bearing = ac.get("bearing_cardinal") or "OVERHEAD"
+    alt_m = float(ac.get("altitude_m") or 0.0)
+    alt_ft = int(alt_m * 3.28084) if alt_m else 0
+    speed_ms = float(ac.get("velocity_ms") or 0.0)
+    speed_kts = int(speed_ms * 1.94384) if speed_ms else 0
+    speed_kmh = int(speed_ms * 3.6) if speed_ms else 0
+    track = int(ac.get("track_deg", 0)) if ac.get("track_deg") is not None else 0
+    v_rate = float(ac.get("vertical_rate") or 0.0)
+    climb_arrow = " ↑" if v_rate > 1.0 else (" ↓" if v_rate < -1.0 else " →")
+
+    if style == "radar":
+        # Full circular PPI radar view
+        _draw_radar_scope(draw, x + 8, y + 8, w - 16, h - 16, scan_r, aircraft_list, tracked_cs=callsign)
+        draw.text((x + 20, y + 20), f"AIRSPACE RADAR · {int(scan_r)} KM", font=T.font(12, bold=True), fill=T.BLACK, anchor="lm")
+        target_str = f"TARGET: {callsign} ({dist_km:.1f} KM {bearing})"
+        if sub_total > 1:
+            target_str = f"[{sub_idx + 1}/{sub_total}] {target_str}"
+        draw.text((x + w - 20, y + 20), target_str, font=T.font(12, bold=True), fill=T.BLACK, anchor="rm")
+        return
+
+    # Orientation & Aspect-Ratio Adaptive Split Mode
+    is_landscape = w >= int(h * 1.15)
+    if style == "split" and is_landscape:
+        # Landscape / Wide layout: Scope on left, telemetry card on right
+        scope_w = min(int(w * 0.40), h - 16)
+        _draw_radar_scope(draw, x + 8, y + 8, scope_w, h - 16, scan_r, aircraft_list, tracked_cs=callsign)
+        div_x = x + scope_w + 16
+        draw.line([(div_x, y + 16), (div_x, y + h - 16)], fill=T.GRAY_BORDER, width=1)
+
+        tx0 = div_x + 18
+        tw = w - (tx0 - x) - 16
+        top_y = y + 16
+
+        cs_f = T.font(max(22, min(34, int(h * 0.16))), bold=True)
+        draw.text((tx0, top_y + 14), callsign, font=cs_f, fill=T.BLACK, anchor="lm")
+
+        sub_f = T.font(max(11, min(14, int(h * 0.075))), bold=False)
+        sub_title = _fit_text(country, max(40, tw - 120), sub_f)
+        draw.text((tx0 + 2, top_y + 36), sub_title, font=sub_f, fill=T.GRAY_MUTED, anchor="lm")
+
+        dist_badge = f"{dist_km:.1f} KM {bearing}" if dist_km > 0 else "OVERHEAD"
+        bf = T.font(10, bold=True)
+        bw = T.text_width(dist_badge, bf) + 16
+        bh = 22
+        bx1 = x + w - 16
+        bx0 = bx1 - bw
+        T.draw_concentric_badge(draw, radius, 12, (bx0, top_y + 4, bx1, top_y + 4 + bh), fill=T.BLACK, text=dist_badge, font=bf, text_color=T.WHITE)
+
+        if sub_total > 1:
+            pag_str = f"{sub_idx + 1}/{sub_total}"
+            pb_w = T.text_width(pag_str, bf) + 12
+            pbx1 = bx0 - 6
+            pbx0 = pbx1 - pb_w
+            draw.rounded_rectangle([(pbx0, top_y + 4), (pbx1, top_y + 4 + bh)], radius=5, outline=T.GRAY_BORDER, width=1)
+            draw.text((pbx0 + pb_w // 2, top_y + 4 + bh // 2), pag_str, font=bf, fill=T.BLACK, anchor="mm")
+
+        div_y = y + int(h * 0.32)
+        draw.line([(tx0, div_y), (x + w - 16, div_y)], fill=T.GRAY_BORDER, width=1)
+
+        cols_y = div_y + 8
+        cols_h = y + h - cols_y - 12
+        n_cols = 3
+        cw = tw / float(n_cols)
+
+        metrics_list = [
+            ("ALTITUDE", f"{alt_ft:,} ft{climb_arrow}", f"{int(alt_m):,} m"),
+            ("SPEED", f"{speed_kts} kts", f"{speed_kmh} km/h"),
+            ("HEADING", f"{track}°", str(ac.get("icao24", "")).upper() or "--")
+        ]
+
+        for i, (label, val_main, val_sub) in enumerate(metrics_list):
+            col_x = tx0 + int(i * cw)
+            mid_col_x = col_x + int(cw * 0.5)
+            if i > 0:
+                draw.line([(col_x, cols_y + 6), (col_x, cols_y + cols_h - 6)], fill=T.GRAY_BORDER, width=1)
+            draw.text((mid_col_x, cols_y + 12), label, font=T.font(9, bold=True), fill=T.GRAY_MUTED, anchor="mm")
+            draw.text((mid_col_x, cols_y + cols_h * 0.50), val_main, font=T.font(max(13, min(20, int(cols_h * 0.28))), bold=True), fill=T.BLACK, anchor="mm")
+            draw.text((mid_col_x, cols_y + cols_h * 0.82), val_sub, font=T.font(max(9, min(13, int(cols_h * 0.2))), bold=False), fill=T.GRAY_DARK, anchor="mm")
+        return
+
+    if style == "split" and not is_landscape:
+        # Portrait / Tall layout: Scope on top, telemetry card on bottom
+        scope_h = min(int(h * 0.48), w - 24)
+        _draw_radar_scope(draw, x + 8, y + 8, w - 16, scope_h, scan_r, aircraft_list, tracked_cs=callsign)
+        div_y = y + scope_h + 12
+        draw.line([(x + 16, div_y), (x + w - 16, div_y)], fill=T.GRAY_BORDER, width=1)
+
+        ty0 = div_y + 12
+        th = h - (ty0 - y) - 12
+
+        cs_f = T.font(max(20, min(30, int(th * 0.22))), bold=True)
+        draw.text((x + 20, ty0 + 12), callsign, font=cs_f, fill=T.BLACK, anchor="lm")
+
+        sub_f = T.font(max(11, min(14, int(th * 0.12))), bold=False)
+        sub_title = _fit_text(country, max(40, w - 160), sub_f)
+        draw.text((x + 20, ty0 + 32), sub_title, font=sub_f, fill=T.GRAY_MUTED, anchor="lm")
+
+        dist_badge = f"{dist_km:.1f} KM {bearing}" if dist_km > 0 else "OVERHEAD"
+        bf = T.font(10, bold=True)
+        bw = T.text_width(dist_badge, bf) + 16
+        bh = 22
+        bx1 = x + w - 16
+        bx0 = bx1 - bw
+        T.draw_concentric_badge(draw, radius, 12, (bx0, ty0 + 4, bx1, ty0 + 4 + bh), fill=T.BLACK, text=dist_badge, font=bf, text_color=T.WHITE)
+
+        div_y2 = ty0 + 50
+        draw.line([(x + 16, div_y2), (x + w - 16, div_y2)], fill=T.GRAY_BORDER, width=1)
+
+        cols_y = div_y2 + 6
+        cols_h = y + h - cols_y - 10
+        n_cols = 3
+        cw = (w - 32) / float(n_cols)
+
+        metrics_list = [
+            ("ALTITUDE", f"{alt_ft:,} ft{climb_arrow}", f"{int(alt_m):,} m"),
+            ("SPEED", f"{speed_kts} kts", f"{speed_kmh} km/h"),
+            ("HEADING", f"{track}°", str(ac.get("icao24", "")).upper() or "--")
+        ]
+
+        for i, (label, val_main, val_sub) in enumerate(metrics_list):
+            col_x = x + 16 + int(i * cw)
+            mid_col_x = col_x + int(cw * 0.5)
+            if i > 0:
+                draw.line([(col_x, cols_y + 4), (col_x, cols_y + cols_h - 4)], fill=T.GRAY_BORDER, width=1)
+            draw.text((mid_col_x, cols_y + 10), label, font=T.font(9, bold=True), fill=T.GRAY_MUTED, anchor="mm")
+            draw.text((mid_col_x, cols_y + cols_h * 0.48), val_main, font=T.font(max(12, min(18, int(cols_h * 0.28))), bold=True), fill=T.BLACK, anchor="mm")
+            draw.text((mid_col_x, cols_y + cols_h * 0.80), val_sub, font=T.font(max(9, min(12, int(cols_h * 0.2))), bold=False), fill=T.GRAY_DARK, anchor="mm")
+        return
+
+    # Style: "card" (Full-Width Telemetry Card)
+    top_y = y + 16
+    _draw_icon_glyph(draw, "mdi:airplane", x + 30, top_y + 18, 44, color=T.BLACK)
+
+    cs_f = T.font(max(24, min(36, int(h * 0.16))), bold=True)
+    draw.text((x + 65, top_y + 16), callsign, font=cs_f, fill=T.BLACK, anchor="lm")
+
+    sub_f = T.font(max(12, min(15, int(h * 0.07))), bold=False)
+    sub_title = _fit_text(country, max(60, w - 240), sub_f)
+    draw.text((x + 67, top_y + 38), sub_title, font=sub_f, fill=T.GRAY_MUTED, anchor="lm")
+
+    dist_badge = f"{dist_km:.1f} KM {bearing}" if dist_km > 0 else "OVERHEAD"
+    bf = T.font(11, bold=True)
+    bw = T.text_width(dist_badge, bf) + 16
+    bh = 24
+    bx1 = x + w - 20
+    bx0 = bx1 - bw
+    T.draw_concentric_badge(draw, radius, 12, (bx0, top_y + 6, bx1, top_y + 6 + bh), fill=T.BLACK, text=dist_badge, font=bf, text_color=T.WHITE)
+
+    if sub_total > 1:
+        more_txt = f"FLIGHT {sub_idx + 1} OF {sub_total}"
+        mf = T.font(10, bold=True)
+        draw.text((bx1, top_y + 40), more_txt, font=mf, fill=T.GRAY_DARK, anchor="rm")
+
+    div_y = y + 76
+    draw.line([(x + 16, div_y), (x + w - 16, div_y)], fill=T.GRAY_BORDER, width=1)
+
+    cols_y = div_y + 8
+    cols_h = y + h - cols_y - 12
+    n_cols = 4
+    cw = (w - 32) / float(n_cols)
+
+    metrics_list = [
+        ("ALTITUDE", f"{alt_ft:,} ft{climb_arrow}", f"{int(alt_m):,} m"),
+        ("GROUND SPEED", f"{speed_kts} kts", f"{speed_kmh} km/h"),
+        ("HEADING", f"{track}°", bearing),
+        ("SQUAWK / ICAO", str(ac.get("icao24", "")).upper() or "--", "ADS-B")
+    ]
+
+    for i, (label, val_main, val_sub) in enumerate(metrics_list):
+        col_x = x + 16 + int(i * cw)
+        mid_col_x = col_x + int(cw * 0.5)
+        if i > 0:
+            draw.line([(col_x, cols_y + 6), (col_x, cols_y + cols_h - 6)], fill=T.GRAY_BORDER, width=1)
+        draw.text((mid_col_x, cols_y + 14), label, font=T.font(10, bold=True), fill=T.GRAY_MUTED, anchor="mm")
+        draw.text((mid_col_x, cols_y + cols_h * 0.52), val_main, font=T.font(max(14, min(22, int(cols_h * 0.26))), bold=True), fill=T.BLACK, anchor="mm")
+        draw.text((mid_col_x, cols_y + cols_h * 0.82), val_sub, font=T.font(max(10, min(14, int(cols_h * 0.18))), bold=False), fill=T.GRAY_DARK, anchor="mm")
+
+
+def _draw_sports_racing(img, draw, el, raw_val, display=None):
+    """Draw Formula 1 & motorsport pit-wall leaderboard with Apple craftsmanship."""
+    x, y, w, h = _clamp_box(el, default_w=800, default_h=340, display=display)
+    radius = int(el.get("radius", 20))
+
+    # Outer Container
+    T.draw_card(draw, [(x, y), (x + w, y + h)], radius=radius, fill=T.WHITE, outline=T.GRAY_BORDER, shadow=True)
+
+    data = _parse_val_json(raw_val)
+    if not isinstance(data, dict):
+        data = {
+            "series": "F1",
+            "event_name": "Italian Grand Prix",
+            "circuit": "Autodromo Nazionale Monza",
+            "session": "Race",
+            "status": "IN",
+            "lap": 42,
+            "total_laps": 53,
+            "leader": "VER",
+            "standings": [
+                {"pos": 1, "driver": "VER", "team": "Red Bull", "gap": "LEADER", "tyre": "M"},
+                {"pos": 2, "driver": "NOR", "team": "McLaren", "gap": "+2.1s", "tyre": "H"},
+                {"pos": 3, "driver": "PIA", "team": "McLaren", "gap": "+4.8s", "tyre": "H"},
+                {"pos": 4, "driver": "LEC", "team": "Ferrari", "gap": "+7.3s", "tyre": "H"},
+                {"pos": 5, "driver": "SAI", "team": "Ferrari", "gap": "+11.0s", "tyre": "M"},
+                {"pos": 6, "driver": "HAM", "team": "Mercedes", "gap": "+14.2s", "tyre": "M"},
+                {"pos": 7, "driver": "RUS", "team": "Mercedes", "gap": "+18.9s", "tyre": "H"},
+                {"pos": 8, "driver": "ALO", "team": "Aston Martin", "gap": "+25.1s", "tyre": "M"},
+                {"pos": 9, "driver": "TSU", "team": "RB", "gap": "+32.0s", "tyre": "H"},
+                {"pos": 10, "driver": "HUL", "team": "Haas", "gap": "+38.4s", "tyre": "H"}
+            ]
+        }
+
+    series = str(data.get("series") or "F1").upper()
+    event_name = str(data.get("event_name") or "Formula 1 Grand Prix").upper()
+    status = str(data.get("status") or "IN").upper()
+    lap = data.get("lap")
+    total_laps = data.get("total_laps")
+    standings = data.get("standings") or []
+
+    # Header Bar
+    header_h = min(48, max(34, int(h * 0.16)))
+    _draw_icon_glyph(draw, "mdi:flag-checkered", x + 24, y + header_h // 2, 22, color=T.BLACK)
+    hf = T.font(max(13, min(18, int(header_h * 0.42))), bold=True)
+    header_txt = _fit_text(f"{series} · {event_name}", max(40, w - 200), hf)
+    draw.text((x + 44, y + header_h // 2), header_txt, font=hf, fill=T.BLACK, anchor="lm")
+
+    # Status badge at top right
+    status_txt = f"LAP {lap}/{total_laps}" if (lap and total_laps) else (data.get("clock") or status)
+    bf = T.font(11, bold=True)
+    bw = T.text_width(status_txt, bf) + 16
+    bh = 22
+    bx1 = x + w - 16
+    bx0 = bx1 - bw
+    T.draw_concentric_badge(draw, radius, 12, (bx0, y + 8, bx1, y + 8 + bh), fill=T.BLACK, text=status_txt, font=bf, text_color=T.WHITE)
+
+    draw.line([(x + 16, y + header_h), (x + w - 16, y + header_h)], fill=T.GRAY_BORDER, width=1)
+
+    if not standings:
+        # Pre-race or schedule view
+        mid_x = x + w // 2
+        mid_y = y + header_h + int((h - header_h) * 0.45)
+        _draw_icon_glyph(draw, "mdi:racing-helmet", mid_x, mid_y - 24, 46, color=T.BLACK)
+        circ = data.get("circuit") or "Grand Prix Circuit"
+        draw.text((mid_x, mid_y + 16), circ, font=T.font(16, bold=True), fill=T.BLACK, anchor="mm")
+        detail = data.get("detail") or "Session scheduled soon"
+        draw.text((mid_x, mid_y + 38), detail, font=T.font(12, bold=False), fill=T.GRAY_MUTED, anchor="mm")
+        return
+
+    # Leaderboard (Top 10: 1-5 left, 6-10 right if w >= 520; else 1-5)
+    two_col = w >= 520
+    display_drivers = standings[:10] if two_col else standings[:5]
+    n_rows = 5
+    body_y = y + header_h + 8
+    row_h = (h - header_h - 16) // n_rows
+
+    if two_col:
+        col_w = (w - 36) // 2
+        mid_div = x + col_w + 18
+        draw.line([(mid_div, body_y + 4), (mid_div, y + h - 12)], fill=T.GRAY_BORDER, width=1)
+
+    for idx, drv in enumerate(display_drivers):
+        is_right = two_col and (idx >= 5)
+        cx0 = (x + 18) if not is_right else (mid_div + 18)
+        r_idx = idx if not is_right else (idx - 5)
+        ry = body_y + r_idx * row_h
+        ry_mid = ry + row_h // 2
+        rw = (mid_div - 18) if (two_col and not is_right) else (x + w - 18)
+
+        pos_str = f"P{drv.get('pos', idx + 1)}"
+        code = str(drv.get("driver") or drv.get("code") or drv.get("name") or "DRV")[:3].upper()
+        team = str(drv.get("team") or drv.get("constructor") or "")
+        gap = str(drv.get("gap") or drv.get("interval") or "")
+        tyre = str(drv.get("tyre") or "")[:1].upper()
+
+        draw.text((cx0 + 2, ry_mid), pos_str, font=T.font(10, bold=True), fill=T.GRAY_MUTED, anchor="lm")
+        draw.text((cx0 + 32, ry_mid), code, font=T.font(13, bold=True), fill=T.BLACK, anchor="lm")
+
+        off_x = cx0 + 66
+        if tyre in ("S", "M", "H", "I", "W"):
+            draw.rounded_rectangle([(off_x, ry_mid - 8), (off_x + 16, ry_mid + 8)], radius=3, outline=T.GRAY_BORDER, fill=T.GRAY_SURFACE, width=1)
+            draw.text((off_x + 8, ry_mid), tyre, font=T.font(9, bold=True), fill=T.BLACK, anchor="mm")
+            off_x += 22
+
+        if team:
+            gap_w = T.text_width(gap, T.font(11, bold=True)) + 12 if gap else 0
+            avail_tw = max(20, rw - off_x - gap_w)
+            team_fit = _fit_text(team, avail_tw, T.font(11, bold=False))
+            draw.text((off_x, ry_mid), team_fit, font=T.font(11, bold=False), fill=T.GRAY_DARK, anchor="lm")
+
+        if gap:
+            draw.text((rw, ry_mid), gap, font=T.font(11, bold=True), fill=T.BLACK, anchor="rm")
+
+        if r_idx < n_rows - 1:
+            draw.line([(cx0, ry + row_h - 1), (rw, ry + row_h - 1)], fill=T.GRAY_SURFACE, width=1)
+
+
+def _draw_sports_match(img, draw, el, raw_val, display=None):
+    """Draw live sports scoreboard with Apple-grade typography and score presentation."""
+    x, y, w, h = _clamp_box(el, default_w=800, default_h=340, display=display)
+    radius = int(el.get("radius", 20))
+
+    # Outer Container
+    T.draw_card(draw, [(x, y), (x + w, y + h)], radius=radius, fill=T.WHITE, outline=T.GRAY_BORDER, shadow=True)
+
+    raw_parsed = _parse_val_json(raw_val)
+    sub_idx = int(el.get("sub_index", 0))
+    sub_total = 1
+
+    if isinstance(raw_parsed, list) and raw_parsed:
+        sub_total = len(raw_parsed)
+        if sub_idx >= sub_total:
+            sub_idx = 0
+        data = raw_parsed[sub_idx]
+    elif isinstance(raw_parsed, dict):
+        data = raw_parsed
+    else:
+        data = {
+            "league": "PREMIER LEAGUE",
+            "venue": "Emirates Stadium",
+            "clock": "74' · 2ND HALF",
+            "status": "IN",
+            "home_team": "ARSENAL",
+            "home_score": 2,
+            "home_stats": "14 Shots · 58% Poss",
+            "away_team": "CHELSEA",
+            "away_score": 1,
+            "away_stats": "6 Shots · 42% Poss",
+            "events_home": "Saka (22'), Havertz (58')",
+            "events_away": "Palmer (41' pen)"
+        }
+
+    league = str(data.get("league") or "MATCH").upper()
+    venue = str(data.get("venue") or "").upper()
+    header_title = f"{league} · {venue}" if venue else league
+    clock = str(data.get("clock") or data.get("status") or "LIVE").upper()
+
+    header_h = min(48, max(34, int(h * 0.16)))
+    hf = T.font(max(13, min(18, int(header_h * 0.42))), bold=True)
+    draw.text((x + 20, y + header_h // 2), _fit_text(header_title, max(40, w - 200), hf), font=hf, fill=T.BLACK, anchor="lm")
+
+    # Clock / Status badge
+    bf = T.font(11, bold=True)
+    bw = T.text_width(clock, bf) + 16
+    bh = 22
+    bx1 = x + w - 16
+    bx0 = bx1 - bw
+    T.draw_concentric_badge(draw, radius, 12, (bx0, y + 8, bx1, y + 8 + bh), fill=T.BLACK, text=clock, font=bf, text_color=T.WHITE)
+
+    # Sub-item pagination badge (e.g. [ 2 / 5 ])
+    if sub_total > 1:
+        pag_badge = f"{sub_idx + 1}/{sub_total}"
+        pb_f = T.font(10, bold=True)
+        pb_w = T.text_width(pag_badge, pb_f) + 14
+        pbx1 = bx0 - 8
+        pbx0 = pbx1 - pb_w
+        draw.rounded_rectangle([(pbx0, y + 8), (pbx1, y + 8 + bh)], radius=5, outline=T.GRAY_BORDER, width=1)
+        draw.text((pbx0 + pb_w // 2, y + 8 + bh // 2), pag_badge, font=pb_f, fill=T.BLACK, anchor="mm")
+
+    draw.line([(x + 16, y + header_h), (x + w - 16, y + header_h)], fill=T.GRAY_BORDER, width=1)
+
+    mid_x = x + w // 2
+    hero_y = y + header_h + int((h - header_h) * 0.40)
+
+    h_name = str(data.get("home_team") or "HOME").upper()
+    a_name = str(data.get("away_team") or "AWAY").upper()
+    h_score = str(data.get("home_score") if data.get("home_score") is not None else "-")
+    a_score = str(data.get("away_score") if data.get("away_score") is not None else "-")
+
+    # Team names font
+    tf = T.font(min(28, max(16, int(w * 0.035))), bold=True)
+    draw.text((mid_x - 120, hero_y - 18), _fit_text(h_name, int(w * 0.32), tf), font=tf, fill=T.BLACK, anchor="rm")
+    draw.text((mid_x + 120, hero_y - 18), _fit_text(a_name, int(w * 0.32), tf), font=tf, fill=T.BLACK, anchor="lm")
+
+    # Stats under team names
+    h_stat = str(data.get("home_stats") or "")
+    a_stat = str(data.get("away_stats") or "")
+    sf = T.font(11, bold=False)
+    if h_stat:
+        draw.text((mid_x - 120, hero_y + 14), _fit_text(h_stat, int(w * 0.32), sf), font=sf, fill=T.GRAY_MUTED, anchor="rm")
+    if a_stat:
+        draw.text((mid_x + 120, hero_y + 14), _fit_text(a_stat, int(w * 0.32), sf), font=sf, fill=T.GRAY_MUTED, anchor="lm")
+
+    # Big Scores in center
+    sc_f = T.font(min(62, max(42, int(h * 0.26))), bold=True)
+    draw.text((mid_x - 55, hero_y - 4), h_score, font=sc_f, fill=T.BLACK, anchor="mm")
+    draw.text((mid_x, hero_y - 8), "—", font=T.font(28, bold=True), fill=T.GRAY_MUTED, anchor="mm")
+    draw.text((mid_x + 55, hero_y - 4), a_score, font=sc_f, fill=T.BLACK, anchor="mm")
+
+    # Match highlights / scorers
+    ev_h = str(data.get("events_home") or "")
+    ev_a = str(data.get("events_away") or "")
+    if ev_h or ev_a:
+        div_y2 = y + h - 50
+        draw.line([(x + 20, div_y2), (x + w - 20, div_y2)], fill=T.GRAY_BORDER, width=1)
+        ef = T.font(11, bold=True)
+        if ev_h:
+            draw.text((mid_x - 20, y + h - 24), _fit_text(ev_h, int(w * 0.44), ef), font=ef, fill=T.GRAY_DARK, anchor="rm")
+        if ev_a:
+            draw.text((mid_x + 20, y + h - 24), _fit_text(ev_a, int(w * 0.44), ef), font=ef, fill=T.GRAY_DARK, anchor="lm")
+
+
 DRAWERS = {
     "text": _draw_text,
     "number": _draw_text,
@@ -875,6 +1433,10 @@ DRAWERS = {
     "action_tile": _draw_tile,
     "calendar_timeline": _draw_calendar_timeline,
     "weather_forecast": _draw_weather_forecast,
+    "flight_tracker": _draw_flight_tracker,
+    "flight_radar": _draw_flight_tracker,
+    "sports_racing": _draw_sports_racing,
+    "sports_match": _draw_sports_match,
 }
 
 
@@ -949,7 +1511,7 @@ def render_page(
                 if metrics is not None and got:
                     entry = {"i": i, **got[0]}
                     metrics.append(entry)
-            elif el["type"] in ("dynamic_grid", "calendar_timeline", "weather_forecast"):
+            elif el["type"] in ("dynamic_grid", "calendar_timeline", "weather_forecast", "flight_tracker", "flight_radar", "sports_racing", "sports_match"):
                 drawer(img, d, el, vals.get(i), display=display)
             else:
                 drawer(img, d, el, element_text(el, vals, i), display=display)
@@ -1153,5 +1715,31 @@ def collect_templates(page):
                     "{{ {'temperature': state_attr('" + binding._quote(ent) + "', 'temperature'), "
                     "'condition': states('" + binding._quote(ent) + "'), "
                     "'forecast': (state_attr('" + binding._quote(ent) + "', 'forecast') or [])[:7]} | to_json }}"
+                )
+        elif el.get("type") in ("flight_tracker", "flight_radar"):
+            ent = str(el.get("entity") or "").strip()
+            raw_val = el.get("value")
+            if raw_val and "{{" in str(raw_val):
+                out[i] = str(raw_val)
+            elif ent and ("." in ent):
+                out[i] = (
+                    "{"
+                    f"'entity': '{binding._quote(ent)}', "
+                    f"'state': states('{binding._quote(ent)}'), "
+                    f"'attributes': (states['{binding._quote(ent)}'].attributes if states['{binding._quote(ent)}'] is defined else {{}})"
+                    "} | to_json"
+                )
+        elif el.get("type") in ("sports_racing", "sports_match"):
+            ent = str(el.get("entity") or "").strip()
+            raw_val = el.get("value")
+            if raw_val and "{{" in str(raw_val):
+                out[i] = str(raw_val)
+            elif ent and ("." in ent):
+                out[i] = (
+                    "{"
+                    f"'entity': '{binding._quote(ent)}', "
+                    f"'state': states('{binding._quote(ent)}'), "
+                    f"'attributes': (states['{binding._quote(ent)}'].attributes if states['{binding._quote(ent)}'] is defined else {{}})"
+                    "} | to_json"
                 )
     return out
