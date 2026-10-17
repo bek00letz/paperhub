@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.3.0 - Intelligent Edge Zones, Custom Canvases, Live WebSocket Updates & Modern Responsive Reflow
+
+- **Intelligent Edge Turn Zones ("Book Metaphor" Navigation)**:
+  - **Single Page Auto-Suppression**: When a dashboard has only 1 screen/page, edge turn zones are automatically disabled and hidden, liberating the full 100% canvas width for widgets and tiles.
+  - **Multi-Page Safe Canvas Constraints**: When 2 or more pages exist, configurable 15% edge zones become active and physically constrain the canvas. Element dragging, resizing, arrow-key nudging, duplication, and alignment buttons (`Center X`, `Full Width`) strictly respect the `[edgeZoneW, curW - edgeZoneW]` safe boundaries, preventing cards from overlapping gutters.
+  - **Visual Chevrons**: Active edge zones display large, elegant single-arrow chevrons (`‹` and `›`, SF Pro Display 42px) with clean labels both in the visual editor and on rendered e-reader frames.
+  - **Swipe-Only Toggle**: Users can disable edge zones via toolbar toggle (`📖 Edge Zones`) to rely purely on swipe gestures (`swipe_left` / `swipe_right`) across multi-page setups.
+  - **Element Touch Priority**: Server-side hit-testing prioritizes interactive elements first. Tapping an element near the margin always triggers the entity action; page turns occur only if a tap lands in an empty gutter.
+- **Real-Time Live Updates without Manual Refresh**:
+  - **Home Assistant WebSocket Event Stream**: Background listener connects directly to HA core WebSocket (`http://supervisor/core/websocket`), authenticates via `SUPERVISOR_TOKEN`, and subscribes to `state_changed` events.
+  - **Instant Push Invalidation**: Whenever any entity changes (e.g. temperature sensor updates from 21.4°C to 21.5°C, or a light switch toggles), PaperHub invalidates caches and immediately pushes real-time Server-Sent Events (SSE) to connected tablets, Chrome kiosks, and PWA clients.
+  - **Fallback Periodic Refresh**: Added 30-second background poll in Kiosk and PWA frontends plus server ticker loop, guaranteeing clocks, calendars, and sensors stay fresh even if Wi-Fi or SSE blips.
+- **Custom Canvas Dimensions**:
+  - Added arbitrary custom canvas sizing (`spec.display = "custom"`) with inline Width, Height, and PPI inputs in the editor toolbar.
+  - Full server-side rasterization and hit-testing support for non-standard e-ink displays, custom HDMI/EPD monitors, and DIY projects.
+- **Dynamic State-Aware Icons (E-Ink High Contrast)**:
+  - Implemented comprehensive `DYNAMIC_ICON_PAIRS` dictionary and smart heuristic fallbacks for lights, switches, fans, climate, doors, windows, locks, media players, and security sensors (e.g. `mdi:lightbulb` $\leftrightarrow$ `mdi:lightbulb-outline`, `mdi:fan` $\leftrightarrow$ `mdi:fan-off`, `mdi:door-open` $\leftrightarrow$ `mdi:door-closed`, `mdi:volume-high` $\leftrightarrow$ `mdi:volume-off`).
+  - Automatically swaps icon glyphs on inactive states while preserving typography contrast on grayscale Carta screens.
+- **Friendly Name Normalization**:
+  - Fixed entity resolution so `attributes.friendly_name` is cleanly mapped to `name` across REST `/states`, fixture data, and frontend datalists, eliminating raw entity ID fallbacks.
+- **Modern Responsive Reflow**:
+  - Replaced legacy hardcoded 272×792 shelf tag reflow with modern multi-column responsive layout engine (3-4 columns for high-DPI landscape, 2 columns for portrait, full width for widgets).
+- **Expanded Test Suite**:
+  - Added 5 new automated tests in `test_paperhub.py` (16 total, 100% passing).
+
 ## 1.2.0 - Apple Home Control Tiles, Smart Drag-and-Drop, and Live Touch Simulation
 
 - **First-Class Apple Home Control Tiles (`tile`)**:

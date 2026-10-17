@@ -387,6 +387,104 @@ class TestAppleHomeTilesAndSimulation(unittest.TestCase):
         asyncio.run(_run())
 
 
+class TestPaperHubV130Features(unittest.TestCase):
+    def test_dynamic_icon_resolution(self):
+        """Verify dynamic state-aware off icons are resolved correctly for all domains."""
+        self.assertEqual(T.get_dynamic_off_icon("mdi:lightbulb"), "mdi:lightbulb-outline")
+        self.assertEqual(T.get_dynamic_off_icon("mdi:fan"), "mdi:fan-off")
+        self.assertEqual(T.get_dynamic_off_icon("mdi:power"), "mdi:power-off")
+        self.assertEqual(T.get_dynamic_off_icon("mdi:door-open"), "mdi:door-closed")
+        self.assertEqual(T.get_dynamic_off_icon("mdi:volume-high"), "mdi:volume-off")
+        self.assertEqual(T.get_dynamic_off_icon("mdi:speaker"), "mdi:speaker-off")
+        self.assertEqual(T.get_dynamic_off_icon("mdi:thermostat"), "mdi:thermostat-box")
+        # Heuristic fallback for light domain
+        self.assertEqual(T.get_dynamic_off_icon("mdi:spotlight", domain="light"), "mdi:spotlight-outline")
+        # Heuristic fallback for switch domain
+        self.assertEqual(T.get_dynamic_off_icon("mdi:pump", domain="switch"), "mdi:pump-off")
+
+    def test_element_priority_over_edge_turn(self):
+        """Verify that an element near the margin receives touch rather than false page turn."""
+        # Page on Boox Go 6 (1072w). Edge 15% is x <= 160.8.
+        # Place a tile at x=64, w=456 (overlapping x in [64, 520]).
+        page = {
+            "elements": [
+                {
+                    "type": "tile",
+                    "x": 64,
+                    "y": 100,
+                    "w": 456,
+                    "h": 140,
+                    "entity": "light.office",
+                    "touch": {"action": "toggle"},
+                }
+            ]
+        }
+        # Tap at x=100 (inside 15% edge zone 160px, BUT also inside tile [64, 520])
+        hit = L.hit_test(page, 100, 150, display="boox_go_6", orientation=0, edge_nav_ratio=0.15)
+        self.assertTrue(hit.get("handled"))
+        self.assertEqual(hit.get("type"), "element_action")
+        self.assertEqual(hit.get("entity"), "light.office")
+        self.assertEqual(hit.get("action"), "toggle")
+
+        # Empty tap at x=40, y=800 (no element) should trigger edge turn
+        edge_hit = L.hit_test(page, 40, 800, display="boox_go_6", orientation=0, edge_nav_ratio=0.15)
+        self.assertTrue(edge_hit.get("handled"))
+        self.assertEqual(edge_hit.get("type"), "nav_prev")
+        self.assertEqual(edge_hit.get("edge"), "left")
+
+    def test_edge_nav_suppression_single_page(self):
+        """Verify edge zones are completely suppressed when edge_nav_ratio is 0 (single page)."""
+        page = {"elements": []}
+        # Tap at x=40 (within 15% margin) with edge_nav_ratio=0.0
+        hit = L.hit_test(page, 40, 500, display="boox_go_6", orientation=0, edge_nav_ratio=0.0)
+        self.assertFalse(hit.get("handled"))
+        self.assertEqual(hit.get("type"), "miss")
+
+    def test_custom_canvas_profile(self):
+        """Verify custom canvas profile allows arbitrary dimensions and renders cleanly."""
+        custom_spec = {"w": 1200, "h": 820, "ppi": 200, "margin": 36}
+        disp = T.get_display(custom_spec)
+        self.assertEqual(disp["w"], 1200)
+        self.assertEqual(disp["h"], 820)
+        self.assertEqual(disp["ppi"], 200)
+        self.assertEqual(disp["margin"], 36)
+
+        page = {
+            "elements": [
+                {
+                    "type": "tile",
+                    "x": 36,
+                    "y": 40,
+                    "w": 500,
+                    "h": 140,
+                    "title": "Custom Canvas Tile",
+                    "entity": "light.office",
+                }
+            ]
+        }
+        img = L.render_page(page, {}, display=custom_spec, clock="12:00 PM")
+        self.assertEqual(img.size, (1200, 820))
+        self.assertEqual(img.mode, "L")
+
+    def test_friendly_names_in_entities(self):
+        """Verify api_entities returns normalized top-level friendly name and unit."""
+        async def _run():
+            req = make_mocked_request("GET", "/api/entities")
+            resp = await server.api_entities(req)
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.text)
+            self.assertIsInstance(data, list)
+            self.assertGreater(len(data), 0)
+            first = data[0]
+            self.assertIn("name", first)
+            self.assertIn("unit", first)
+            self.assertIn("entity_id", first)
+            # Friendly name must not be None or empty
+            self.assertTrue(len(first["name"]) > 0)
+        asyncio.run(_run())
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

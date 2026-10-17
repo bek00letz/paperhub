@@ -201,7 +201,108 @@ def get_display(key=None):
     target = alias_map.get(k)
     if target and target in DISPLAYS:
         return DISPLAYS[target]
+    # Custom Canvas profile
+    if k == "custom" or (isinstance(key, dict) and ("w" in key or "custom_w" in key)):
+        custom_spec = key if isinstance(key, dict) else {}
+        w = int(custom_spec.get("w") or custom_spec.get("custom_w") or 1200)
+        h = int(custom_spec.get("h") or custom_spec.get("custom_h") or 820)
+        ppi = int(custom_spec.get("ppi") or custom_spec.get("custom_ppi") or 200)
+        margin = int(custom_spec.get("margin") or custom_spec.get("custom_margin") or 40)
+        ratio = float(custom_spec.get("edge_nav_ratio") or custom_spec.get("custom_edge_nav_ratio") or 0.15)
+        return {
+            "id": "custom",
+            "name": f"Custom Canvas ({w}×{h})",
+            "category": "custom",
+            "w": w,
+            "h": h,
+            "ppi": ppi,
+            "diagonal_in": round(((w / ppi)**2 + (h / ppi)**2)**0.5, 1) if ppi > 0 else 7.0,
+            "mm_w": round(w / ppi * 25.4, 1) if ppi > 0 else 100.0,
+            "mm_h": round(h / ppi * 25.4, 1) if ppi > 0 else 100.0,
+            "margin": margin,
+            "touch": True,
+            "edge_nav_ratio": ratio,
+        }
+
     return DISPLAYS[DEFAULT_DISPLAY]
+
+
+# Comprehensive Dynamic Icon Pairs for active vs inactive entity states
+DYNAMIC_ICON_PAIRS = {
+    # Lights
+    "mdi:lightbulb": "mdi:lightbulb-outline",
+    "mdi:lightbulb-on": "mdi:lightbulb-outline",
+    "mdi:lightbulb-on-outline": "mdi:lightbulb-outline",
+    "mdi:lamp": "mdi:lamp-outline",
+    "mdi:ceiling-light": "mdi:ceiling-light-outline",
+    "mdi:floor-lamp": "mdi:floor-lamp-outline",
+    "mdi:wall-sconce": "mdi:wall-sconce-outline",
+    "mdi:led-strip": "mdi:led-strip-variant",
+    "mdi:chandelier": "mdi:chandelier",
+    # Switches, Sockets & Power
+    "mdi:power-socket-eu": "mdi:power-socket-eu",
+    "mdi:power-socket-us": "mdi:power-socket-us",
+    "mdi:power-socket-uk": "mdi:power-socket-uk",
+    "mdi:power-plug": "mdi:power-plug-off",
+    "mdi:power": "mdi:power-off",
+    "mdi:toggle-switch": "mdi:toggle-switch-off",
+    "mdi:lightning-bolt": "mdi:lightning-bolt-outline",
+    "mdi:flash": "mdi:flash-outline",
+    # Climate, Heating & Fans
+    "mdi:thermostat": "mdi:thermostat-box",
+    "mdi:radiator": "mdi:radiator-off",
+    "mdi:fire": "mdi:fire-off",
+    "mdi:snowflake": "mdi:snowflake-off",
+    "mdi:hvac": "mdi:hvac-off",
+    "mdi:fan": "mdi:fan-off",
+    "mdi:air-conditioner": "mdi:air-conditioner-off",
+    "mdi:water-boiler": "mdi:water-boiler-off",
+    "mdi:heat-wave": "mdi:radiator-off",
+    # Doors, Windows & Locks
+    "mdi:door-open": "mdi:door-closed",
+    "mdi:door": "mdi:door-closed",
+    "mdi:lock-open": "mdi:lock",
+    "mdi:lock": "mdi:lock-open",
+    "mdi:window-open": "mdi:window-closed",
+    "mdi:window-shutter-open": "mdi:window-shutter",
+    "mdi:garage-open": "mdi:garage",
+    "mdi:gate-open": "mdi:gate",
+    "mdi:shield-check": "mdi:shield-off",
+    "mdi:motion-sensor": "mdi:motion-sensor-off",
+    "mdi:cctv": "mdi:cctv-off",
+    # Media & Sound
+    "mdi:speaker": "mdi:speaker-off",
+    "mdi:volume-high": "mdi:volume-off",
+    "mdi:volume-medium": "mdi:volume-off",
+    "mdi:television": "mdi:television-off",
+    "mdi:play-circle": "mdi:pause-circle",
+    "mdi:music": "mdi:music-off",
+    # Network & Appliances
+    "mdi:router-wireless": "mdi:router-wireless-off",
+    "mdi:wifi": "mdi:wifi-off",
+    "mdi:washing-machine": "mdi:washing-machine-off",
+    "mdi:coffee-maker": "mdi:coffee-maker-outline",
+}
+
+
+def get_dynamic_off_icon(active_icon: str, domain: str = "") -> str:
+    """Resolve the appropriate inactive/off MDI icon glyph."""
+    if not active_icon:
+        active_icon = "mdi:power"
+    clean = str(active_icon).strip()
+    if clean in DYNAMIC_ICON_PAIRS:
+        return DYNAMIC_ICON_PAIRS[clean]
+
+    if clean.endswith("-outline") or clean.endswith("-off"):
+        return clean
+    if clean.endswith("-open"):
+        return clean[:-5] + "-closed"
+    if domain == "light":
+        return clean + "-outline"
+    if domain in ("switch", "fan"):
+        return clean + "-off"
+
+    return clean + "-outline"
 
 
 # 16-level grayscale palette (4-bit Carta native depth)

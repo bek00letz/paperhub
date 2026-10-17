@@ -289,6 +289,11 @@
       refreshFrame();
       connectSSE();
       requestWakeLock();
+
+      // 30-second background poll fallback (keeps clock and sensors fresh even if SSE drops)
+      setInterval(() => {
+        refreshFrame();
+      }, 30000);
     })();
   </script>
 </body>

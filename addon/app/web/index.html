@@ -479,35 +479,40 @@ main {
   top: 0;
   bottom: 0;
   width: 15%;
-  background: rgba(2, 132, 199, 0.08);
-  border: 1.5px dashed var(--accent);
+  background: rgba(0, 0, 0, 0.03);
+  border-right: 1.5px dashed rgba(0, 0, 0, 0.22);
   pointer-events: none;
   z-index: 100;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--accent);
-  text-transform: uppercase;
-}
-#canvas.show-edge-zones .edge-turn-zone {
-  display: flex;
-}
-.edge-turn-zone.edge-left {
-  left: 0;
-  border-left: none;
+  gap: 12px;
+  user-select: none;
 }
 .edge-turn-zone.edge-right {
   right: 0;
   border-right: none;
+  border-left: 1.5px dashed rgba(0, 0, 0, 0.22);
 }
-.edge-turn-zone span {
+.edge-chevron {
+  font-size: 42px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+  font-weight: 200;
+  line-height: 1;
+  color: #111111;
+  opacity: 0.75;
+}
+.edge-label {
   writing-mode: vertical-rl;
-  text-orientation: mixed;
   transform: rotate(180deg);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #333333;
+  opacity: 0.65;
   background: rgba(255, 255, 255, 0.85);
-  padding: 8px 3px;
+  padding: 6px 3px;
   border-radius: 4px;
 }
 
@@ -1135,8 +1140,17 @@ aside {
             <option value="trmnl_og">TRMNL 7.5" (800 × 480, 120 PPI)</option>
             <option value="trmnl_x">TRMNL X 10.3" (1872 × 1404, 227 PPI)</option>
             <option value="crowpanel_579">CrowPanel 5.79" (792 × 272)</option>
+            <option value="custom">⚙️ Custom Canvas...</option>
           </select>
         </label>
+        <span id="custom-canvas-controls" style="display:none;align-items:center;gap:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1px 6px">
+          <input type="number" id="custom-w" placeholder="W" style="width:52px;padding:1px 4px;font-size:11px;border:none;background:transparent;color:inherit;font-weight:600;text-align:center" value="1200" title="Width (px)">
+          <span style="font-size:11px;color:var(--text-secondary)">×</span>
+          <input type="number" id="custom-h" placeholder="H" style="width:52px;padding:1px 4px;font-size:11px;border:none;background:transparent;color:inherit;font-weight:600;text-align:center" value="820" title="Height (px)">
+          <span style="font-size:11px;color:var(--text-secondary)">@</span>
+          <input type="number" id="custom-ppi" placeholder="PPI" style="width:42px;padding:1px 4px;font-size:11px;border:none;background:transparent;color:inherit;font-weight:600;text-align:center" value="200" title="Screen PPI">
+          <span style="font-size:10px;color:var(--text-secondary)">PPI</span>
+        </span>
         <span class="badge-tag" id="res-badge">1072 × 1448 px</span>
         <span class="badge-tag">16-Level Grayscale (Carta)</span>
         <label class="badge-tag" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
@@ -1176,8 +1190,14 @@ aside {
       </div>
       <div id="canvas-housing">
         <div id="canvas">
-          <div class="edge-turn-zone edge-left"><span>◀ PREV PAGE (15%)</span></div>
-          <div class="edge-turn-zone edge-right"><span>NEXT PAGE ▶ (15%)</span></div>
+          <div class="edge-turn-zone edge-left">
+            <span class="edge-chevron">‹</span>
+            <span class="edge-label">PREV PAGE</span>
+          </div>
+          <div class="edge-turn-zone edge-right">
+            <span class="edge-chevron">›</span>
+            <span class="edge-label">NEXT PAGE</span>
+          </div>
           <div class="safe-zone safe-footer"><span id="safefootertag" class="safe-tag" style="right:8px;top:4px">footer zone</span></div>
           <div class="safe-zone safe-lock"><span class="safe-tag" style="right:4px;bottom:4px">lock</span></div>
         </div>
@@ -1515,7 +1535,27 @@ let viewDist = localStorage.getItem("epaper_view_dist") || "3.0";
 
 const $ = id => document.getElementById(id);
 const canvas = $("canvas"), bezel = $("bezel-wrapper");
-const curDisplay = () => DISPLAYS[spec.display] || DISPLAYS.crowpanel_579;
+const curDisplay = () => {
+  if (spec.display === "custom") {
+    const w = parseInt(spec.custom_w || 1200, 10);
+    const h = parseInt(spec.custom_h || 820, 10);
+    const ppi = parseInt(spec.custom_ppi || 200, 10);
+    const margin = parseInt(spec.custom_margin || 40, 10);
+    const ratio = parseFloat(spec.custom_edge_nav_ratio || spec.edge_nav_ratio || 0.15);
+    return {
+      id: "custom",
+      name: `Custom (${w}×${h})`,
+      category: "custom",
+      w, h, ppi, margin,
+      touch: true,
+      edge_nav_ratio: ratio,
+      diagonal_in: ppi > 0 ? Math.round(Math.sqrt((w/ppi)**2 + (h/ppi)**2) * 10) / 10 : 7.0,
+      mm_w: ppi > 0 ? Math.round(w / ppi * 25.4 * 10) / 10 : 100,
+      mm_h: ppi > 0 ? Math.round(h / ppi * 25.4 * 10) / 10 : 100
+    };
+  }
+  return DISPLAYS[spec.display] || DISPLAYS.boox_go_6 || DISPLAYS.crowpanel_579;
+};
 const isPortrait = () => [90, 270].includes(Number(spec.orientation || 0));
 const curW = () => isPortrait() ? curDisplay().h : curDisplay().w;
 const curH = () => isPortrait() ? curDisplay().w : curDisplay().h;
@@ -1527,9 +1567,53 @@ const curFooterH = () => {
 const curSafeH = () => curH() - curFooterH();
 const curMargin = () => {
   const cw = curW();
-  const m = curDisplay().margin;
+  const m = curDisplay().margin || 40;
   return cw < 400 ? Math.min(m, 16) : m;
 };
+const hasMultiPages = () => Object.keys(spec.pages || {}).length > 1;
+const isEdgeNavActive = () => spec.edge_nav !== false && hasMultiPages();
+const curEdgeNavRatio = () => isEdgeNavActive() ? parseFloat(spec.edge_nav_ratio ?? 0.15) : 0;
+const curEdgeNavW = () => isEdgeNavActive() ? Math.round(curW() * curEdgeNavRatio()) : 0;
+const curSafeLeft = () => isEdgeNavActive() ? curEdgeNavW() : 0;
+const curSafeRight = () => curW() - (isEdgeNavActive() ? curEdgeNavW() : 0);
+const curSafeW = () => curW() - (isEdgeNavActive() ? curEdgeNavW() * 2 : 0);
+
+const DYNAMIC_ICONS = {
+  "mdi:lightbulb": "mdi:lightbulb-outline",
+  "mdi:lightbulb-on": "mdi:lightbulb-outline",
+  "mdi:lamp": "mdi:lamp-outline",
+  "mdi:ceiling-light": "mdi:ceiling-light-outline",
+  "mdi:floor-lamp": "mdi:floor-lamp-outline",
+  "mdi:wall-sconce": "mdi:wall-sconce-outline",
+  "mdi:power-plug": "mdi:power-plug-off",
+  "mdi:power": "mdi:power-off",
+  "mdi:toggle-switch": "mdi:toggle-switch-off",
+  "mdi:thermostat": "mdi:thermostat-box",
+  "mdi:radiator": "mdi:radiator-off",
+  "mdi:fire": "mdi:fire-off",
+  "mdi:snowflake": "mdi:snowflake-off",
+  "mdi:fan": "mdi:fan-off",
+  "mdi:air-conditioner": "mdi:air-conditioner-off",
+  "mdi:door-open": "mdi:door-closed",
+  "mdi:door": "mdi:door-closed",
+  "mdi:lock-open": "mdi:lock",
+  "mdi:lock": "mdi:lock-open",
+  "mdi:window-open": "mdi:window-closed",
+  "mdi:speaker": "mdi:speaker-off",
+  "mdi:volume-high": "mdi:volume-off",
+  "mdi:television": "mdi:television-off"
+};
+
+function getDynamicOffIcon(activeIcon, domain = "") {
+  if (!activeIcon) return "mdi:power-off";
+  const clean = String(activeIcon).trim();
+  if (DYNAMIC_ICONS[clean]) return DYNAMIC_ICONS[clean];
+  if (clean.endsWith("-outline") || clean.endsWith("-off")) return clean;
+  if (clean.endsWith("-open")) return clean.slice(0, -5) + "-closed";
+  if (domain === "light") return clean + "-outline";
+  if (domain === "switch" || domain === "fan") return clean + "-off";
+  return clean + "-outline";
+}
 const api = (p, o) => fetch(p, o).then(r => r.ok ? r : Promise.reject(new Error(r.status + " " + r.statusText)));
 const esc = t => String(t ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -1656,6 +1740,15 @@ function syncOrientUI() {
   if ($("cfg_orient")) $("cfg_orient").value = o;
   if ($("disp-select")) $("disp-select").value = curDisplay().id;
   if ($("cfg_model")) $("cfg_model").value = curDisplay().id;
+
+  const isCust = spec.display === "custom";
+  if ($("custom-canvas-controls")) $("custom-canvas-controls").style.display = isCust ? "inline-flex" : "none";
+  if (isCust) {
+    if ($("custom-w")) $("custom-w").value = spec.custom_w || 1200;
+    if ($("custom-h")) $("custom-h").value = spec.custom_h || 820;
+    if ($("custom-ppi")) $("custom-ppi").value = spec.custom_ppi || 200;
+  }
+
   const port = isPortrait();
   bezel.classList.toggle("portrait", port);
   canvas.classList.toggle("portrait", port);
@@ -1674,9 +1767,31 @@ function syncOrientUI() {
   if (safeLock) {
     safeLock.style.left = `${cw - 44}px`;
   }
+
+  // Edge Turn Zones configuration & visibility
+  const edgeActive = isEdgeNavActive();
+  const edgeRatio = curEdgeNavRatio();
+  document.querySelectorAll(".edge-turn-zone").forEach(z => {
+    z.style.display = edgeActive ? "flex" : "none";
+    z.style.width = (edgeRatio * 100) + "%";
+  });
+  if ($("edgenavbtn")) {
+    $("edgenavbtn").classList.toggle("active", edgeActive);
+    const pCount = Object.keys(spec.pages || {}).length;
+    if (spec.edge_nav === false) {
+      $("edgenavbtn").textContent = "📖 Edge: Off";
+      $("edgenavbtn").title = "Edge turn zones disabled (Swipes only). Click to enable.";
+    } else if (pCount <= 1) {
+      $("edgenavbtn").textContent = "📖 Edge: Inactive (1 Page)";
+      $("edgenavbtn").title = "Edge zones disabled: Dashboard has only 1 page.";
+    } else {
+      $("edgenavbtn").textContent = `📖 Edge: Active (${Math.round(edgeRatio * 100)}%)`;
+      $("edgenavbtn").title = "Edge turn zones active (15% gutters reserved). Click to disable.";
+    }
+  }
 }
 
-/* Page reflow between orientations */
+/* Page reflow between orientations and canvas dimensions */
 function reflowPageElements(p, toPortrait) {
   const list = p && p.elements;
   if (!Array.isArray(list) || !list.length) return;
@@ -1687,10 +1802,16 @@ function reflowPageElements(p, toPortrait) {
   const fsz = TH < 200 ? 14 : (TH < 400 ? 18 : 20);
   const footerH = Math.round(fsz * 1.8);
   const safeH = TH - footerH;
-  const margin = TW < 400 ? Math.min(disp.margin || 24, 16) : (disp.margin || 32);
-  const usableW = TW - (margin * 2);
+  const margin = Math.max(16, disp.margin || 32);
+  const hasMulti = Object.keys(spec.pages || {}).length > 1;
+  const edgeActive = spec.edge_nav !== false && hasMulti;
+  const edgeW = edgeActive ? Math.round(TW * parseFloat(spec.edge_nav_ratio || 0.15)) : 0;
+  const leftBound = Math.max(edgeW, margin);
+  const rightBound = Math.min(TW - edgeW, TW - margin);
+  const usableW = rightBound - leftBound;
 
-  // Group elements by type
+  const tiles = list.filter(e => ["tile", "light_tile", "switch_tile", "climate_tile", "sensor_tile", "media_tile", "action_tile"].includes(e.type));
+  const widgets = list.filter(e => ["calendar_timeline", "weather_forecast"].includes(e.type));
   const grids = list.filter(e => e.type === "dynamic_grid");
   const icons = list.filter(e => e.type === "icon");
   const curves = list.filter(e => e.type === "curve");
@@ -1698,282 +1819,116 @@ function reflowPageElements(p, toPortrait) {
   const numbers = list.filter(e => e.type === "number");
   const texts = list.filter(e => e.type === "text");
 
+  // Dynamic Grid reflow: full usable area
   if (grids.length) {
     grids.forEach(g => {
-      g.x = margin;
-      g.y = 16;
+      g.x = leftBound;
+      g.y = Math.round(TH * 0.04);
       g.w = usableW;
-      g.h = safeH - 24;
+      g.h = safeH - Math.round(TH * 0.08);
     });
     return;
   }
 
-  // Detect Clock page: single prominent time template + date
-  const isClock = texts.some(t => String(t.value || "").includes("%H:%M") || String(t.value || "").includes("%I:%M"));
+  // Modern Tiles & Widgets Dashboard Reflow
+  if (tiles.length || widgets.length) {
+    let cursorY = Math.round(TH * 0.04);
+    const gap = TW >= 1200 ? 20 : 14;
 
-  // Detect 2-stat comparison page (e.g. temps: 2 numbers + 2 labels)
-  const isTwoStat = (numbers.length === 2 && texts.length === 2) || (numbers.length === 2 && texts.length <= 3 && curves.length === 0);
+    // Place widgets first (full width)
+    widgets.forEach(w => {
+      w.x = leftBound;
+      w.y = cursorY;
+      w.w = usableW;
+      w.h = w.type === "calendar_timeline" ? Math.min(360, Math.round(safeH * 0.38)) : Math.min(280, Math.round(safeH * 0.30));
+      cursorY += w.h + gap;
+    });
 
-  if (toPortrait) {
-    // ==========================================
-    // === REFLOW TO PORTRAIT (272w × 792h) ===
-    // ==========================================
-    if (isTwoStat) {
-      // Two stacked cards with horizontal divider between them
-      const sortedNums = [...numbers].sort((a, b) => a.x - b.x || a.y - b.y);
-      const sortedTexts = [...texts].sort((a, b) => a.x - b.x || a.y - b.y);
+    // Responsive multi-column layout for tiles
+    let cols = 1;
+    if (usableW >= 1200) cols = 4;
+    else if (usableW >= 880) cols = 3;
+    else if (usableW >= 540) cols = 2;
+    else cols = 1;
 
-      const cardH = Math.round((safeH - 40) / 2);
-      const topMid = Math.round(cardH / 2);
-      const botMid = cardH + 40 + Math.round(cardH / 2);
+    const tileW = Math.floor((usableW - (cols - 1) * gap) / cols);
+    const tileH = TW >= 1200 ? 150 : (TW >= 800 ? 138 : 124);
 
-      // Card 1
-      if (sortedTexts[0]) {
-        sortedTexts[0].x = margin; sortedTexts[0].w = usableW; sortedTexts[0].align = "center";
-        sortedTexts[0].y = Math.max(16, topMid - 60); sortedTexts[0].h = 36;
-        if (sortedTexts[0].size && sortedTexts[0].size > 30) sortedTexts[0].size = 28;
-      }
-      if (sortedNums[0]) {
-        sortedNums[0].x = margin; sortedNums[0].w = usableW; sortedNums[0].align = "center";
-        sortedNums[0].y = topMid - 16; sortedNums[0].h = 92;
-        if (sortedNums[0].size && sortedNums[0].size > 72) sortedNums[0].size = 68;
-      }
-
-      // Horizontal Divider
-      const divLine = lines[0] || (lines.length ? lines[0] : null);
-      if (divLine) {
-        divLine.x = margin + 16; divLine.w = usableW - 32; divLine.h = 2;
-        divLine.y = cardH + 18;
-      }
-
-      // Card 2
-      if (sortedTexts[1]) {
-        sortedTexts[1].x = margin; sortedTexts[1].w = usableW; sortedTexts[1].align = "center";
-        sortedTexts[1].y = botMid - 60; sortedTexts[1].h = 36;
-        if (sortedTexts[1].size && sortedTexts[1].size > 30) sortedTexts[1].size = 28;
-      }
-      if (sortedNums[1]) {
-        sortedNums[1].x = margin; sortedNums[1].w = usableW; sortedNums[1].align = "center";
-        sortedNums[1].y = botMid - 16; sortedNums[1].h = 92;
-        if (sortedNums[1].size && sortedNums[1].size > 72) sortedNums[1].size = 68;
-      }
-      return;
-    }
-
-    if (isClock) {
-      // Clock layout in portrait: Icon top, Time centered, Date below
-      const timeEl = texts.find(t => String(t.value || "").includes("%H:%M") || String(t.value || "").includes("%I:%M"));
-      const dateEl = texts.find(t => t !== timeEl);
-      const iconEl = icons[0];
-
-      const sections = [];
-      if (iconEl) {
-        const sz = Math.min(90, Math.round(TW * 0.32));
-        iconEl.w = sz; iconEl.h = sz;
-        iconEl.x = Math.round((TW - sz) / 2);
-        sections.push({ el: iconEl, h: sz });
-      }
-      if (timeEl) {
-        timeEl.x = margin; timeEl.w = usableW; timeEl.align = "center";
-        timeEl.h = 96;
-        timeEl.size = Math.min(timeEl.size || 88, 76);
-        timeEl.bold = true;
-        sections.push({ el: timeEl, h: 96 });
-      }
-      if (dateEl) {
-        dateEl.x = margin; dateEl.w = usableW; dateEl.align = "center";
-        dateEl.h = 42;
-        dateEl.size = Math.min(dateEl.size || 32, 26);
-        sections.push({ el: dateEl, h: 42 });
-      }
-
-      const totH = sections.reduce((s, x) => s + x.h, 0);
-      const gap = Math.max(16, Math.min(36, Math.round((safeH - totH) / (sections.length + 1))));
-      let yC = Math.max(margin, Math.round((safeH - (totH + gap * (sections.length - 1))) / 2));
-      for (const s of sections) {
-        s.el.y = yC;
-        yC += s.h + gap;
-      }
-      return;
-    }
-
-    // Standard Hero Stat + Icon + Subtitle + Curve / Secondary
-    const heroIcon = icons[0];
-    const heroStat = numbers[0] || texts.find(t => (t.bold || (t.size || 0) >= 50)) || texts[0];
-    const subtitle = texts.find(t => t !== heroStat && (t.size || 30) <= 36);
-    const heroCurve = curves[0];
-    const secondaries = [...numbers, ...texts].filter(e => e !== heroStat && e !== subtitle);
-
-    const sections = [];
-
-    // 1. Icon Section (Hero Visual)
-    if (heroIcon) {
-      const iconSide = Math.min(92, Math.max(64, Math.round(TW * 0.33)));
-      heroIcon.w = iconSide; heroIcon.h = iconSide;
-      heroIcon.x = Math.round((TW - iconSide) / 2);
-      sections.push({ el: heroIcon, h: iconSide, gapAfter: 14 });
-    }
-
-    // 2. Hero Stat Section
-    if (heroStat) {
-      heroStat.x = margin; heroStat.w = usableW; heroStat.align = "center";
-      heroStat.h = Math.min(100, Math.max(76, Math.round(TH * 0.12)));
-      if (heroStat.size && heroStat.size > 72) heroStat.size = 68;
-      sections.push({ el: heroStat, h: heroStat.h, gapAfter: 4 });
-    }
-
-    // 3. Subtitle Section
-    if (subtitle) {
-      subtitle.x = margin; subtitle.w = usableW; subtitle.align = "center";
-      subtitle.h = 36;
-      if (subtitle.size && subtitle.size > 28) subtitle.size = 26;
-      sections.push({ el: subtitle, h: 36, gapAfter: 18 });
-    }
-
-    // 4. Divider Line (if lines exist or between stat and curve)
-    if (lines.length > 0) {
-      const lineEl = lines[0];
-      lineEl.x = margin + 16; lineEl.w = usableW - 32; lineEl.h = 2;
-      sections.push({ el: lineEl, h: 2, gapAfter: 18 });
-    }
-
-    // 5. Curve / Graph Section
-    if (heroCurve) {
-      heroCurve.x = margin; heroCurve.w = usableW;
-      heroCurve.h = Math.min(150, Math.max(100, Math.round(TH * 0.18)));
-      sections.push({ el: heroCurve, h: heroCurve.h, gapAfter: 16 });
-    }
-
-    // 6. Secondary Stats Section
-    for (const sec of secondaries) {
-      sec.x = margin; sec.w = usableW; sec.align = "center";
-      sec.h = 36;
-      if (sec.size && sec.size > 30) sec.size = 26;
-      sections.push({ el: sec, h: 36, gapAfter: 12 });
-    }
-
-    // Cleanly distribute sections vertically within safe area
-    const totalH = sections.reduce((sum, s) => sum + s.h, 0);
-    const totalGaps = sections.reduce((sum, s, idx) => idx < sections.length - 1 ? sum + (s.gapAfter || 14) : sum, 0);
-    const remSpace = safeH - (totalH + totalGaps);
-    const extraPerGap = remSpace > 0 ? Math.min(18, Math.round(remSpace / (sections.length + 1))) : 0;
-    let yC = Math.max(margin, Math.round((safeH - (totalH + totalGaps + extraPerGap * (sections.length - 1))) / 2));
-
-    for (let i = 0; i < sections.length; i++) {
-      const s = sections[i];
-      s.el.y = Math.min(safeH - s.h, yC);
-      yC += s.h + (s.gapAfter || 14) + extraPerGap;
-    }
-
-  } else {
-    // ==========================================
-    // === REFLOW TO LANDSCAPE (792w × 272h) ===
-    // ==========================================
-    if (isTwoStat) {
-      // 2 horizontal columns with vertical divider
-      const sortedNums = [...numbers].sort((a, b) => a.y - b.y || a.x - b.x);
-      const sortedTexts = [...texts].sort((a, b) => a.y - b.y || a.x - b.x);
-      const colW = Math.round((usableW - 40) / 2);
-      const midX = margin + colW + 20;
-
-      // Col 1 (left)
-      if (sortedTexts[0]) {
-        sortedTexts[0].x = margin + 16; sortedTexts[0].w = colW - 32; sortedTexts[0].align = "left";
-        sortedTexts[0].y = 40; sortedTexts[0].h = 36; sortedTexts[0].size = 30;
-      }
-      if (sortedNums[0]) {
-        sortedNums[0].x = margin + 10; sortedNums[0].w = colW - 20; sortedNums[0].align = "left";
-        sortedNums[0].y = 86; sortedNums[0].h = 114;
-      }
-
-      // Vertical Divider
-      const divLine = lines[0] || (lines.length ? lines[0] : null);
-      if (divLine) {
-        divLine.x = midX - 2; divLine.w = 4; divLine.y = 36; divLine.h = 160;
-      }
-
-      // Col 2 (right)
-      if (sortedTexts[1]) {
-        sortedTexts[1].x = midX + 24; sortedTexts[1].w = colW - 32; sortedTexts[1].align = "left";
-        sortedTexts[1].y = 40; sortedTexts[1].h = 36; sortedTexts[1].size = 30;
-      }
-      if (sortedNums[1]) {
-        sortedNums[1].x = midX + 18; sortedNums[1].w = colW - 20; sortedNums[1].align = "left";
-        sortedNums[1].y = 86; sortedNums[1].h = 114;
-      }
-      return;
-    }
-
-    if (isClock) {
-      const timeEl = texts.find(t => String(t.value || "").includes("%H:%M") || String(t.value || "").includes("%I:%M"));
-      const dateEl = texts.find(t => t !== timeEl);
-      const iconEl = icons[0];
-
-      if (timeEl) {
-        timeEl.x = margin + 8; timeEl.y = 20; timeEl.w = Math.round(usableW * 0.62);
-        timeEl.h = 138; timeEl.size = 110; timeEl.bold = true; timeEl.align = "left";
-      }
-      if (dateEl) {
-        dateEl.x = margin + 12; dateEl.y = 166; dateEl.w = Math.round(usableW * 0.65);
-        dateEl.h = 44; dateEl.size = 36; dateEl.align = "left";
-      }
-      if (iconEl) {
-        iconEl.w = 120; iconEl.h = 120;
-        iconEl.x = TW - margin - 120; iconEl.y = 36;
-      }
-      return;
-    }
-
-    // Standard Landscape layout
-    const heroIcon = icons[0];
-    const heroStat = numbers[0] || texts.find(t => (t.bold || (t.size || 0) >= 50)) || texts[0];
-    const subtitle = texts.find(t => t !== heroStat && (t.size || 30) <= 36);
-    const heroCurve = curves[0];
-    const secondaries = [...numbers, ...texts].filter(e => e !== heroStat && e !== subtitle);
-
-    let leftCursor = margin;
-
-    // 1. Icon on left
-    if (heroIcon) {
-      const iconSide = Math.min(116, Math.max(80, Math.round(TH * 0.44)));
-      heroIcon.w = iconSide; heroIcon.h = iconSide;
-      heroIcon.x = margin;
-      heroIcon.y = Math.round((safeH - iconSide) / 2);
-      leftCursor += iconSide + 20;
-    }
-
-    // 2. Middle column: Hero Stat + Subtitle
-    const midW = heroCurve ? Math.round(usableW * 0.44) : (TW - margin - leftCursor);
-    if (heroStat) {
-      heroStat.x = leftCursor; heroStat.y = 28; heroStat.w = midW; heroStat.h = 126;
-      heroStat.align = "left";
-      if (heroStat.size && heroStat.size < 80) heroStat.size = 96;
-    }
-    if (subtitle) {
-      subtitle.x = leftCursor + 4; subtitle.y = 164; subtitle.w = midW; subtitle.h = 42;
-      subtitle.align = "left"; subtitle.size = 30;
-    }
-
-    // 3. Right column: Curve or Secondary Stat
-    if (heroCurve) {
-      const curveW = Math.min(280, Math.round(usableW * 0.38));
-      heroCurve.x = TW - margin - curveW;
-      heroCurve.y = 92;
-      heroCurve.w = curveW;
-      heroCurve.h = 90;
-    }
-
-    if (secondaries.length > 0) {
-      const sec = secondaries[0];
-      const secW = Math.min(300, Math.round(usableW * 0.38));
-      sec.x = TW - margin - secW;
-      sec.y = 164;
-      sec.w = secW;
-      sec.h = 42;
-      sec.align = "right";
-      sec.size = 28;
-    }
+    tiles.forEach((t, idx) => {
+      const col = idx % cols;
+      const row = Math.floor(idx / cols);
+      t.x = leftBound + col * (tileW + gap);
+      t.y = cursorY + row * (tileH + gap);
+      t.w = tileW;
+      t.h = tileH;
+    });
+    return;
   }
+
+  // Clock page: single prominent time template + date
+  const isClock = texts.some(t => String(t.value || "").includes("%H:%M") || String(t.value || "").includes("%I:%M"));
+  if (isClock) {
+    const timeEl = texts.find(t => String(t.value || "").includes("%H:%M") || String(t.value || "").includes("%I:%M"));
+    const dateEl = texts.find(t => t !== timeEl);
+    const iconEl = icons[0];
+    if (toPortrait) {
+      if (iconEl) {
+        const sz = Math.min(140, Math.round(TW * 0.28));
+        iconEl.w = sz; iconEl.h = sz; iconEl.x = Math.round(leftBound + (usableW - sz) / 2); iconEl.y = Math.round(TH * 0.12);
+      }
+      if (timeEl) {
+        timeEl.x = leftBound; timeEl.w = usableW; timeEl.align = "center";
+        timeEl.y = Math.round(TH * 0.32); timeEl.h = Math.round(TH * 0.18); timeEl.size = Math.min(130, Math.round(TW * 0.20));
+      }
+      if (dateEl) {
+        dateEl.x = leftBound; dateEl.w = usableW; dateEl.align = "center";
+        dateEl.y = Math.round(TH * 0.52); dateEl.h = 60; dateEl.size = Math.min(42, Math.round(TW * 0.05));
+      }
+    } else {
+      if (timeEl) {
+        timeEl.x = leftBound; timeEl.y = Math.round(TH * 0.12); timeEl.w = Math.round(usableW * 0.65);
+        timeEl.h = Math.round(TH * 0.45); timeEl.size = Math.min(160, Math.round(TH * 0.35)); timeEl.align = "left";
+      }
+      if (dateEl) {
+        dateEl.x = leftBound + 6; dateEl.y = Math.round(TH * 0.60); dateEl.w = Math.round(usableW * 0.65);
+        dateEl.h = 60; dateEl.size = Math.min(46, Math.round(TH * 0.08)); dateEl.align = "left";
+      }
+      if (iconEl) {
+        const sz = Math.min(220, Math.round(TH * 0.5));
+        iconEl.w = sz; iconEl.h = sz;
+        iconEl.x = rightBound - sz; iconEl.y = Math.round((safeH - sz) / 2);
+      }
+    }
+    return;
+  }
+
+  // 2-stat page reflow
+  const isTwoStat = (numbers.length === 2 && texts.length === 2) || (numbers.length === 2 && texts.length <= 3 && curves.length === 0);
+  if (isTwoStat) {
+    const sortedNums = [...numbers].sort((a, b) => a.x - b.x || a.y - b.y);
+    const sortedTexts = [...texts].sort((a, b) => a.x - b.x || a.y - b.y);
+    if (toPortrait) {
+      const cardH = Math.round((safeH - 40) / 2);
+      if (sortedTexts[0]) { sortedTexts[0].x = leftBound; sortedTexts[0].w = usableW; sortedTexts[0].y = 40; sortedTexts[0].align = "center"; }
+      if (sortedNums[0]) { sortedNums[0].x = leftBound; sortedNums[0].w = usableW; sortedNums[0].y = 90; sortedNums[0].align = "center"; }
+      if (lines[0]) { lines[0].x = leftBound + 16; lines[0].w = usableW - 32; lines[0].y = cardH + 20; lines[0].h = 2; }
+      if (sortedTexts[1]) { sortedTexts[1].x = leftBound; sortedTexts[1].w = usableW; sortedTexts[1].y = cardH + 40; sortedTexts[1].align = "center"; }
+      if (sortedNums[1]) { sortedNums[1].x = leftBound; sortedNums[1].w = usableW; sortedNums[1].y = cardH + 90; sortedNums[1].align = "center"; }
+    } else {
+      const colW = Math.round((usableW - 32) / 2);
+      if (sortedTexts[0]) { sortedTexts[0].x = leftBound; sortedTexts[0].w = colW; sortedTexts[0].y = 40; sortedTexts[0].align = "left"; }
+      if (sortedNums[0]) { sortedNums[0].x = leftBound; sortedNums[0].w = colW; sortedNums[0].y = 90; sortedNums[0].align = "left"; }
+      if (lines[0]) { lines[0].x = leftBound + colW + 14; lines[0].w = 2; lines[0].y = 30; lines[0].h = safeH - 60; }
+      if (sortedTexts[1]) { sortedTexts[1].x = leftBound + colW + 32; sortedTexts[1].w = colW; sortedTexts[1].y = 40; sortedTexts[1].align = "left"; }
+      if (sortedNums[1]) { sortedNums[1].x = leftBound + colW + 32; sortedNums[1].w = colW; sortedNums[1].y = 90; sortedNums[1].align = "left"; }
+    }
+    return;
+  }
+
+  // General layout proportional scaling
+  list.forEach(el => {
+    el.x = Math.max(leftBound, Math.min(rightBound - el.w, el.x));
+  });
 }
 
 
@@ -2044,9 +1999,15 @@ async function boot() {
   if (spec.rotate_seconds === undefined) spec.rotate_seconds = 30;
   if ($("rotinterval")) $("rotinterval").value = String(spec.rotate_seconds);
   syncOrientUI();
-  ents = await api("api/entities").then(r => r.json()).catch(() => []);
+  const rawEnts = await api("api/entities").then(r => r.json()).catch(() => []);
+  ents = (Array.isArray(rawEnts) ? rawEnts : []).map(e => {
+    const attrs = e.attributes || {};
+    const friendly = e.name || attrs.friendly_name || (e.entity_id ? e.entity_id.split(".").pop().replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Entity");
+    const unit = e.unit || attrs.unit_of_measurement || "";
+    return { ...e, name: friendly, unit, attributes: attrs };
+  });
   $("entcount").textContent = ents.length;
-  $("entities-dl").innerHTML = ents.map(e => `<option value="${esc(e.entity_id)}">${esc(e.name)} (${esc(e.state)})</option>`).join("");
+  $("entities-dl").innerHTML = ents.map(e => `<option value="${esc(e.entity_id)}">${esc(e.name || e.entity_id)} (${esc(e.state)})</option>`).join("");
   drawEntities("");
   fillPages();
   snapshot();
@@ -2066,6 +2027,7 @@ const fillPages = () => {
     $("rotinterval").value = String(spec.rotate_seconds);
   }
   drawRotationPills();
+  syncOrientUI();
 };
 const page = () => spec.pages[cur];
 const els = () => page().elements || (page().elements = []);
@@ -2265,15 +2227,24 @@ function preview() {
   if (!cur || !page()) return;
   timer = setTimeout(async () => {
     try {
+      const pageKeys = Object.keys(spec.pages || {});
+      const curIdx = pageKeys.indexOf(cur);
+      const dispObj = curDisplay();
       const r = await api("api/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           page: page(),
           label: cur,
+          page_info: {
+            current: (curIdx >= 0 ? curIdx : 0) + 1,
+            total: Math.max(1, pageKeys.length)
+          },
           orientation: Number(spec.orientation || 0),
           distance: Number(viewDist),
-          display: curDisplay().id
+          display: dispObj.id === "custom" ? dispObj : dispObj.id,
+          edge_nav: isEdgeNavActive(),
+          edge_nav_ratio: curEdgeNavRatio()
         })
       });
       try { metrics = JSON.parse(r.headers.get("X-Metrics") || "[]"); } catch (_) { metrics = []; }
@@ -2286,10 +2257,15 @@ function preview() {
   }, 200);
 }
 
-/* Snapping Guides */
+/* Snapping Guides with Physical Edge Zone Constraints */
 function guides(el, i) {
   const cw = curW(), ch = curH(), m = curMargin(), sh = curSafeH();
-  const xs = [0, m, cw / 2, cw - m, cw], ys = [0, 26, ch / 2, sh, ch];
+  const minX = curSafeLeft();
+  const maxX = curSafeRight();
+  const safeW = maxX - minX;
+
+  const xs = [minX, minX + m, minX + Math.round(safeW / 2), maxX - m, maxX];
+  const ys = [0, 26, ch / 2, sh, ch];
   els().forEach((o, j) => {
     if (j !== i) {
       xs.push(o.x, o.x + o.w / 2, o.x + o.w);
@@ -2309,6 +2285,11 @@ function guides(el, i) {
     const t = near(val, ys);
     if (t !== null) { el.y = Math.round(t - (set === "m" ? el.h / 2 : set === "b" ? el.h : 0)); gy = t; break; }
   }
+
+  // Physical edge boundary clamping
+  el.x = Math.max(minX, Math.min(maxX - el.w, el.x));
+  el.y = Math.max(0, Math.min(ch - el.h, el.y));
+
   canvas.querySelectorAll(".guide").forEach(n => n.remove());
   if (gx !== null) {
     const g = document.createElement("div");
@@ -2326,12 +2307,22 @@ function guides(el, i) {
 
 function guidesResize(el, i) {
   const cw = curW(), ch = curH(), m = curMargin(), sh = curSafeH();
-  const xs = [m, cw / 2, cw - m], ys = [26, ch / 2, sh];
+  const minX = curSafeLeft();
+  const maxX = curSafeRight();
+  const safeW = maxX - minX;
+
+  const xs = [minX + m, minX + Math.round(safeW / 2), maxX - m, maxX];
+  const ys = [26, ch / 2, sh];
   els().forEach((o, j) => { if (j !== i) { xs.push(o.x, o.x + o.w); ys.push(o.y, o.y + o.h); } });
   const near = (v, list) => { for (const t of list) if (Math.abs(v - t) <= SNAP) return t; return null; };
   let gx = near(el.x + el.w, xs), gy = near(el.y + el.h, ys);
   if (gx !== null) el.w = Math.round(gx - el.x);
   if (gy !== null) el.h = Math.round(gy - el.y);
+
+  // Resize clamping within safe boundaries
+  if (el.x + el.w > maxX) el.w = Math.max(16, maxX - el.x);
+  if (el.y + el.h > ch) el.h = Math.max(10, ch - el.y);
+
   canvas.querySelectorAll(".guide").forEach(n => n.remove());
   if (gx !== null) { const g = document.createElement("div"); g.className = "guide v"; g.style.left = (gx / cw * 100) + "%"; canvas.appendChild(g); }
   if (gy !== null) { const g = document.createElement("div"); g.className = "guide h"; g.style.top = (gy / ch * 100) + "%"; canvas.appendChild(g); }
@@ -2377,6 +2368,8 @@ async function simulateTouchTap(e) {
   setTimeout(() => ripple.remove(), 320);
 
   try {
+    const dispObj = curDisplay();
+    const hasMulti = Object.keys(spec.pages || {}).length > 1;
     const res = await api(`api/touch?device=editor_preview&x=${tx}&y=${ty}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2384,10 +2377,11 @@ async function simulateTouchTap(e) {
         x: tx,
         y: ty,
         page: page(),
-        display: curDisplay().id,
+        display: dispObj.id === "custom" ? dispObj : dispObj.id,
         orientation: Number(spec.orientation || 0),
-        edge_nav: spec.edge_nav !== false,
-        edge_nav_ratio: Number(spec.edge_nav_ratio || 0.15)
+        edge_nav: isEdgeNavActive(),
+        edge_nav_ratio: curEdgeNavRatio(),
+        has_multiple_pages: hasMulti
       })
     });
     const data = await res.json();
@@ -2454,14 +2448,16 @@ canvas.addEventListener("pointermove", e => {
   if (!drag) return;
   if (!drag.moved) { snapshot(); drag.moved = true; }
   const cw = curW(), ch = curH();
+  const minX = curSafeLeft();
+  const maxX = curSafeRight();
   const dx = (e.clientX - drag.sx) * drag.scale, dy = (e.clientY - drag.sy) * drag.scale;
   const el = els()[drag.i], o = drag.el;
   if (drag.mode === "move") {
-    el.x = Math.max(0, Math.min(cw - o.w, Math.round(o.x + dx)));
+    el.x = Math.max(minX, Math.min(maxX - o.w, Math.round(o.x + dx)));
     el.y = Math.max(0, Math.min(ch - o.h, Math.round(o.y + dy)));
     if (!e.altKey) guides(el, drag.i);
   } else {
-    el.w = Math.max(16, Math.min(cw - o.x, Math.round(o.w + dx)));
+    el.w = Math.max(16, Math.min(maxX - el.x, Math.round(o.w + dx)));
     el.h = Math.max(10, Math.min(ch - o.y, Math.round(o.h + dy)));
     if (!e.altKey) guidesResize(el, drag.i);
   }
@@ -2492,10 +2488,11 @@ addEventListener("keydown", e => {
     e.preventDefault(); snapshot(); els().splice(sel, 1); sel = -1; paint(); preview(); return;
   }
   const step = e.shiftKey ? 10 : 1, el = els()[sel];
+  const minX = curSafeLeft(), maxX = curSafeRight();
   const map = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
   if (map[e.key]) {
     e.preventDefault(); snapshot();
-    el.x = Math.max(0, Math.min(curW() - el.w, el.x + map[e.key][0]));
+    el.x = Math.max(minX, Math.min(maxX - el.w, el.x + map[e.key][0]));
     el.y = Math.max(0, Math.min(curH() - el.h, el.y + map[e.key][1]));
     paint(); preview();
   }
@@ -2504,8 +2501,9 @@ function duplicate() {
   if (sel < 0) return;
   snapshot();
   const c = JSON.parse(JSON.stringify(els()[sel]));
-  c.x = Math.min(curW() - c.w, c.x + 12);
-  c.y = Math.min(curH() - c.h, c.y + 12);
+  const minX = curSafeLeft(), maxX = curSafeRight();
+  c.x = Math.max(minX, Math.min(maxX - c.w, c.x + 16));
+  c.y = Math.min(curSafeH() - c.h, c.y + 16);
   els().push(c); sel = els().length - 1; paint(); preview();
 }
 
@@ -2513,12 +2511,14 @@ function duplicate() {
 document.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
   snapshot();
   const t = b.dataset.add;
-  const m = curMargin(), maxW = curW() - m * 2;
+  const minX = curSafeLeft(), maxX = curSafeRight(), m = curMargin();
+  const usableLeft = Math.max(minX, minX + m);
+  const maxW = Math.max(100, Math.min(maxX - usableLeft - m, curW() - m * 2));
   const isTile = ["tile", "light_tile", "switch_tile", "climate_tile", "sensor_tile", "action_tile"].includes(t);
   const defaultTileW = maxW > 600 ? Math.min(456, Math.floor((maxW - 16) / 2)) : maxW;
   const base = {
     type: isTile ? "tile" : t,
-    x: m,
+    x: usableLeft,
     y: 60,
     w: isTile ? defaultTileW : Math.min(t === "line" ? 240 : 260, maxW),
     h: isTile ? 140 : (t === "line" ? 4 : 90)
@@ -2530,21 +2530,21 @@ document.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
       base.title = "Wall Outlet";
       base.entity = "switch.living_room";
       base.icon = "mdi:power-socket-eu";
-      base.icon_off = "mdi:power-socket-eu";
+      base.icon_off = getDynamicOffIcon("mdi:power-socket-eu", "switch");
       base.touch = { action: "toggle" };
       base.action = "toggle";
     } else if (t === "climate_tile") {
       base.title = "Thermostat";
       base.entity = "climate.living_room";
       base.icon = "mdi:thermostat";
-      base.icon_off = "mdi:thermostat-box";
+      base.icon_off = getDynamicOffIcon("mdi:thermostat", "climate");
       base.touch = { action: "toggle" };
       base.action = "toggle";
     } else if (t === "sensor_tile") {
       base.title = "Indoor Temp";
       base.entity = "sensor.living_room_temperature";
       base.icon = "mdi:thermometer";
-      base.icon_off = "mdi:thermometer-low";
+      base.icon_off = getDynamicOffIcon("mdi:thermometer", "sensor");
       base.touch = { action: "none" };
       base.action = "none";
     } else if (t === "action_tile") {
@@ -2559,7 +2559,7 @@ document.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
       base.title = "Ceiling Light";
       base.entity = "light.living_room";
       base.icon = "mdi:lightbulb";
-      base.icon_off = "mdi:lightbulb-outline";
+      base.icon_off = getDynamicOffIcon("mdi:lightbulb", "light");
       base.touch = { action: "toggle" };
       base.action = "toggle";
     }
@@ -2670,15 +2670,19 @@ function addEntityToCanvas(id, posX, posY) {
   const domain = (id || "").split(".")[0];
   const friendly = (known && known.name) ? known.name : id.split(".").pop().replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
   const icon = suggestIconForEntity(id, friendly);
-  const iconOff = icon.endsWith("-outline") ? icon : (icon + "-outline");
+  const iconOff = getDynamicOffIcon(icon, domain);
+
+  const minX = curSafeLeft(), maxX = curSafeRight();
+  const usableLeft = Math.max(minX, minX + m);
+  const usableMaxW = Math.max(100, maxX - usableLeft - m);
 
   const isCalendar = domain === "calendar";
   const isWeather = domain === "weather";
 
   if (isCalendar) {
-    const w = Math.min(cw - m * 2, 944);
+    const w = Math.min(usableMaxW, 944);
     const h = 340;
-    const x = posX !== undefined ? Math.max(0, Math.min(cw - w, posX)) : m;
+    const x = posX !== undefined ? Math.max(minX, Math.min(maxX - w, posX)) : usableLeft;
     const y = posY !== undefined ? Math.max(0, Math.min(ch - h, posY)) : 60;
     els().push({
       type: "calendar_timeline",
@@ -2689,9 +2693,9 @@ function addEntityToCanvas(id, posX, posY) {
       x, y, w, h
     });
   } else if (isWeather) {
-    const w = Math.min(cw - m * 2, 944);
+    const w = Math.min(usableMaxW, 944);
     const h = 260;
-    const x = posX !== undefined ? Math.max(0, Math.min(cw - w, posX)) : m;
+    const x = posX !== undefined ? Math.max(minX, Math.min(maxX - w, posX)) : usableLeft;
     const y = posY !== undefined ? Math.max(0, Math.min(ch - h, posY)) : 60;
     els().push({
       type: "weather_forecast",
@@ -2703,10 +2707,10 @@ function addEntityToCanvas(id, posX, posY) {
     });
   } else {
     // Apple Home Control Tile
-    const maxW = cw - m * 2;
+    const maxW = usableMaxW;
     const w = maxW > 600 ? Math.min(456, Math.floor((maxW - 16) / 2)) : maxW;
     const h = 140;
-    const x = posX !== undefined ? Math.max(0, Math.min(cw - w, posX)) : m;
+    const x = posX !== undefined ? Math.max(minX, Math.min(maxX - w, posX)) : usableLeft;
     const y = posY !== undefined ? Math.max(0, Math.min(ch - h, posY)) : 60;
 
     let act = "toggle";
@@ -3411,9 +3415,9 @@ function props() {
 
   wireContent(el, box);
   if (el.show === "attribute" && el.entity) loadAttributes(el.entity);
-  $("aligncx").onclick = () => { snapshot(); el.x = Math.round((curW() - el.w) / 2); paint(); preview(); };
+  $("aligncx").onclick = () => { snapshot(); const minX = curSafeLeft(), maxX = curSafeRight(); el.x = Math.round(minX + (maxX - minX - el.w) / 2); paint(); preview(); };
   $("aligncy").onclick = () => { snapshot(); el.y = Math.round((curSafeH() - el.h) / 2); paint(); preview(); };
-  $("alignfw").onclick = () => { snapshot(); const m = curMargin(); el.x = m; el.w = curW() - m * 2; paint(); preview(); };
+  $("alignfw").onclick = () => { snapshot(); const m = curMargin(), minX = Math.max(curSafeLeft(), m), maxX = Math.min(curSafeRight(), curW() - m); el.x = minX; el.w = maxX - minX; paint(); preview(); };
   $("layerup").onclick = () => {
     if (sel >= els().length - 1) return;
     snapshot(); const t = els()[sel]; els()[sel] = els()[sel + 1]; els()[sel + 1] = t; sel++; paint(); preview();
@@ -3609,11 +3613,29 @@ if ($("disp-select")) {
   $("disp-select").onchange = e => {
     snapshot();
     spec.display = e.target.value;
+    if (spec.display === "custom") {
+      if (!spec.custom_w) spec.custom_w = 1200;
+      if (!spec.custom_h) spec.custom_h = 820;
+      if (!spec.custom_ppi) spec.custom_ppi = 200;
+    }
     syncOrientUI();
     paint(); preview();
     msg(`Switched to ${curDisplay().name} (${curDisplay().w}×${curDisplay().h}). Click Save Changes to commit.`);
   };
 }
+
+const onCustomDimChange = () => {
+  snapshot();
+  spec.custom_w = Math.max(300, Math.min(3840, parseInt($("custom-w").value || 1200, 10)));
+  spec.custom_h = Math.max(200, Math.min(2880, parseInt($("custom-h").value || 820, 10)));
+  spec.custom_ppi = Math.max(50, Math.min(600, parseInt($("custom-ppi").value || 200, 10)));
+  syncOrientUI();
+  paint(); preview();
+};
+if ($("custom-w")) $("custom-w").onchange = onCustomDimChange;
+if ($("custom-h")) $("custom-h").onchange = onCustomDimChange;
+if ($("custom-ppi")) $("custom-ppi").onchange = onCustomDimChange;
+
 $("reflowbtn").onclick = reflowCurrentPage;
 $("safebtn").onclick = () => {
   canvas.classList.toggle("show-safe");
@@ -3621,8 +3643,10 @@ $("safebtn").onclick = () => {
 };
 if ($("edgenavbtn")) {
   $("edgenavbtn").onclick = () => {
-    canvas.classList.toggle("show-edge-zones");
-    $("edgenavbtn").classList.toggle("active", canvas.classList.contains("show-edge-zones"));
+    spec.edge_nav = spec.edge_nav === false ? true : false;
+    syncOrientUI();
+    paint(); preview();
+    msg(spec.edge_nav ? "Edge turn zones enabled (15% left/right gutters reserved)." : "Edge turn zones disabled (Swipes only).");
   };
 }
 

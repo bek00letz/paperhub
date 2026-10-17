@@ -2,6 +2,11 @@
   "_comment": "Sample snapshot used when running server.py locally without HA_TOKEN.",
   "taken_at": "2026-10-15T19:25:00+00:00",
   "states": {
+    "light.living_room_ceiling":     {"state": "on", "friendly_name": "Ceiling Light", "brightness": 204},
+    "light.reading_lamp":           {"state": "off", "friendly_name": "Reading Lamp"},
+    "switch.living_room_fan":       {"state": "on", "friendly_name": "Ceiling Fan"},
+    "climate.living_room":          {"state": "heat", "friendly_name": "Thermostat", "temperature": 21.5, "current_temperature": 21.8},
+    "media_player.living_room_speaker": {"state": "playing", "friendly_name": "Sonos Speaker", "media_title": "Amber Ambient", "media_artist": "Tycho"},
     "sensor.solar_today_production": {"state": "10.6", "unit": "kWh", "friendly_name": "Solar Today"},
     "sensor.solar_pv_power":         {"state": "420", "unit": "W", "friendly_name": "Solar Power"},
     "sensor.epaper_solar_month":     {"state": "287", "unit": "kWh", "friendly_name": "Solar This Month"},

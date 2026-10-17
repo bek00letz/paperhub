@@ -389,6 +389,9 @@ async def render_device_frame(session, dev: DeviceSession, spec: dict) -> bytes:
         "total": len(page_keys),
     }
 
+    has_multi = len(page_keys) > 1
+    edge_active = dev.edge_nav and has_multi
+
     img = layout.render_page(
         page,
         vals,
@@ -399,6 +402,8 @@ async def render_device_frame(session, dev: DeviceSession, spec: dict) -> bytes:
         orientation=dev.orientation,
         display=dev.display,
         grayscale=True,
+        edge_nav=edge_active,
+        edge_nav_ratio=dev.edge_nav_ratio,
     )
 
     if dev.orientation:
@@ -435,9 +440,9 @@ async def handle_touch(session, dev: DeviceSession, spec: dict, x: float, y: flo
         dev.active_page = page_keys[prev_idx]
         hit = {"type": "gesture_swipe", "gesture": "swipe_right", "target_page": dev.active_page, "handled": True}
     else:
-        # 2D Hit-Testing on current page
+        # 2D Hit-Testing on current page (only enable edge nav if multiple pages exist)
         active_page_def = pages[dev.active_page]
-        edge_ratio = dev.edge_nav_ratio if dev.edge_nav else 0.0
+        edge_ratio = dev.edge_nav_ratio if (dev.edge_nav and len(page_keys) > 1) else 0.0
         hit = layout.hit_test(
             active_page_def,
             x,
@@ -650,7 +655,8 @@ async def api_touch(request):
     if client_page and isinstance(client_page, dict):
         disp_name = body.get("display") or dev.display
         orient = int(body.get("orientation", dev.orientation))
-        edge_ratio = float(body.get("edge_nav_ratio", 0.15)) if body.get("edge_nav", True) else 0.0
+        has_multi = bool(body.get("has_multiple_pages", True))
+        edge_ratio = float(body.get("edge_nav_ratio", 0.15)) if (body.get("edge_nav", True) and has_multi) else 0.0
         hit = layout.hit_test(
             client_page,
             x,
@@ -796,15 +802,21 @@ async def api_preview(request):
         vals = await resolve_templates(SHARED_SESSION, templates) if templates else {}
 
         clock_str = datetime.now().strftime("%-I:%M %p")
+        page_info = data.get("page_info")
+        edge_nav = bool(data.get("edge_nav", True))
+        edge_nav_ratio = float(data.get("edge_nav_ratio", 0.15))
         img = layout.render_page(
             page,
             vals,
             clock=clock_str,
             label=page.get("name", "Preview"),
             battery_pct=95,
+            page_info=page_info,
             orientation=orientation,
             display=display,
             grayscale=True,
+            edge_nav=edge_nav,
+            edge_nav_ratio=edge_nav_ratio,
         )
 
         return web.Response(body=_png(img), content_type="image/png")
@@ -860,16 +872,34 @@ async def api_entities(request):
         states = load_fixture().get("states", {})
         ents = []
         for eid, s in states.items():
+            friendly = s.get("friendly_name") or s.get("name") or eid.split(".")[-1].replace("_", " ").title()
+            unit = s.get("unit") or s.get("unit_of_measurement", "")
             ents.append({
                 "entity_id": eid,
                 "state": s.get("state", ""),
-                "attributes": {"friendly_name": s.get("friendly_name", eid)},
+                "name": friendly,
+                "unit": unit,
+                "attributes": dict(s, friendly_name=friendly, unit_of_measurement=unit),
             })
         _entity_cache = {"at": now, "items": ents}
         return web.json_response(ents)
 
     try:
-        ents = await ha_json(SHARED_SESSION, "/states")
+        raw_ents = await ha_json(SHARED_SESSION, "/states")
+        ents = []
+        for e in (raw_ents or []):
+            if not isinstance(e, dict):
+                continue
+            attrs = e.get("attributes") or {}
+            friendly = attrs.get("friendly_name") or e.get("name") or e.get("entity_id", "")
+            unit = attrs.get("unit_of_measurement") or e.get("unit", "")
+            ents.append({
+                "entity_id": e.get("entity_id", ""),
+                "state": e.get("state", ""),
+                "name": friendly,
+                "unit": unit,
+                "attributes": attrs,
+            })
         _entity_cache = {"at": now, "items": ents}
         return web.json_response(ents)
     except Exception as exc:
@@ -905,6 +935,62 @@ async def periodic_ticker():
             break
         except Exception as e:
             print(f"Ticker error: {e}", flush=True)
+
+
+async def ha_websocket_listener():
+    """Subscribe to Home Assistant WebSocket state_changed events for instant real-time pushes."""
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return
+
+    url = "http://supervisor/core/websocket"
+    backoff = 3
+    while True:
+        try:
+            async with SHARED_SESSION.ws_connect(url) as ws:
+                msg = await ws.receive_json()
+                if msg.get("type") != "auth_required":
+                    await asyncio.sleep(backoff)
+                    continue
+                await ws.send_json({"type": "auth", "access_token": token})
+                auth_res = await ws.receive_json()
+                if auth_res.get("type") != "auth_ok":
+                    print(f"HA WS auth failed: {auth_res}", flush=True)
+                    await asyncio.sleep(10)
+                    continue
+
+                await ws.send_json({"id": 1, "type": "subscribe_events", "event_type": "state_changed"})
+                await ws.receive_json()
+                print("Connected to Home Assistant WebSocket for live state events", flush=True)
+                backoff = 3
+
+                last_push = 0.0
+                async for ws_msg in ws:
+                    if ws_msg.type == aiohttp.WSMsgType.TEXT:
+                        data = json.loads(ws_msg.data)
+                        if data.get("type") == "event":
+                            global _entity_cache
+                            _entity_cache = None
+
+                            now = time.time()
+                            if now - last_push < 0.4:
+                                continue
+
+                            last_push = now
+                            spec = load_layouts()
+                            for dev in list(DEVICES.devices.values()):
+                                if time.time() - dev.last_seen < 86400:
+                                    await render_device_frame(SHARED_SESSION, dev, spec)
+                                    dev.notify()
+
+                    elif ws_msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                        break
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            await asyncio.sleep(backoff)
+            backoff = min(60, backoff * 1.5)
 
 
 async def start_app(app_runners):
@@ -990,12 +1076,14 @@ async def main():
     await render_device_frame(SHARED_SESSION, def_dev, spec)
 
     ticker_task = asyncio.create_task(periodic_ticker())
+    ws_task = asyncio.create_task(ha_websocket_listener())
 
     try:
         while True:
             await asyncio.sleep(3600)
     finally:
         ticker_task.cancel()
+        ws_task.cancel()
         for r in app_runners:
             await r.cleanup()
         if SHARED_SESSION:

@@ -156,10 +156,22 @@ def _draw_text(img, draw, el, val, metrics=None, *, distance_m=3.0, display=None
 
 def _draw_icon(img, draw, el, val="", display=None):
     x, y, w, h = _clamp_box(el, default_w=120, default_h=120, display=display)
-    name = el.get("icon") or val
+    active_icon = el.get("icon") or (val if str(val).startswith("mdi:") else "mdi:power")
+    domain = el.get("entity", "").split(".")[0] if el.get("entity") else ""
+
+    state_raw = str(val or el.get("state", "on")).strip().lower()
+    is_on = state_raw in ("on", "playing", "open", "active", "home", "unlocked") or (
+        state_raw.replace(".", "", 1).isdigit() and float(state_raw) > 0
+    )
+    if not el.get("entity"):
+        name = active_icon
+    else:
+        off_icon = el.get("icon_off") or T.get_dynamic_off_icon(active_icon, domain)
+        name = active_icon if is_on else off_icon
+
     if not name:
         return
-    color = T.BLACK if el.get("color") != "muted" else T.GRAY_MUTED
+    color = T.BLACK if is_on and el.get("color") != "muted" else T.GRAY_MUTED
     sz = min(w, h)
     _draw_icon_glyph(draw, name, x + w // 2, y + h // 2, sz, color=color)
 
@@ -462,9 +474,7 @@ def _draw_tile(img, draw, el, val="", display=None):
         default_icon = "mdi:gauge"
 
     active_icon = el.get("icon") or default_icon
-    off_icon = el.get("icon_off") or (
-        active_icon.removesuffix("-outline") + "-outline" if not active_icon.endswith("-outline") else active_icon
-    )
+    off_icon = el.get("icon_off") or T.get_dynamic_off_icon(active_icon, domain)
     icon_name = active_icon if is_on else off_icon
 
     # Color Palette logic
@@ -919,6 +929,8 @@ def render_page(
     distance_m=3.0,
     display=None,
     grayscale=True,
+    edge_nav=True,
+    edge_nav_ratio=0.15,
 ):
     """Draw a complete page onto a high-DPI 16-level grayscale bitmap canvas."""
     img, d = T.new_canvas(orientation=orientation, display=display)
@@ -945,6 +957,17 @@ def render_page(
             # One bad element must never crash the page
             continue
 
+    # Subtle page turn chevrons in edge gutters when multiple pages are configured
+    if edge_nav and edge_nav_ratio > 0 and page_info and page_info.get("total", 1) > 1:
+        cw, ch = T.canvas_dims(orientation, display)
+        mid_y = ch // 2
+        f_chevron = T.font(size=44, bold=False, family="lato")
+        edge_w = int(cw * float(edge_nav_ratio))
+        # Left subtle chevron indicator
+        d.text((edge_w // 2, mid_y), "‹", fill=T.GRAY_MUTED, font=f_chevron, anchor="mm")
+        # Right subtle chevron indicator
+        d.text((cw - edge_w // 2, mid_y), "›", fill=T.GRAY_MUTED, font=f_chevron, anchor="mm")
+
     # Ambient footer with time, page dots, battery
     T.footer(
         d,
@@ -967,36 +990,17 @@ def hit_test(page, x, y, *, display=None, orientation=0, edge_nav_ratio=0.15):
 
     Returns:
         Dict describing hit action:
+        - {"type": "element_action", "element_index": ..., "action": ..., "entity": ..., ...}
         - {"type": "nav_prev", "edge": "left", "handled": True}
         - {"type": "nav_next", "edge": "right", "handled": True}
-        - {"type": "element_action", "element_index": ..., "action": ..., "entity": ..., ...}
         - {"type": "miss", "handled": False}
     """
     cw, ch = T.canvas_dims(orientation, display)
     x = max(0, min(cw, int(x)))
     y = max(0, min(ch, int(y)))
 
-    # 1. Edge Tap Navigation ("Book Metaphor")
-    if edge_nav_ratio and edge_nav_ratio > 0:
-        edge_w = int(cw * float(edge_nav_ratio))
-        if x <= edge_w:
-            return {
-                "type": "nav_prev",
-                "edge": "left",
-                "handled": True,
-                "x": x,
-                "y": y,
-            }
-        if x >= cw - edge_w:
-            return {
-                "type": "nav_next",
-                "edge": "right",
-                "handled": True,
-                "x": x,
-                "y": y,
-            }
-
-    # 2. Center Zone Element Hit-Testing (top layers first)
+    # 1. Element Hit-Testing (top layers first)
+    # Tapping an interactive element always takes priority over edge turns!
     elements = page.get("elements", [])
     for i in reversed(range(len(elements))):
         el = elements[i]
@@ -1030,6 +1034,8 @@ def hit_test(page, x, y, *, display=None, orientation=0, edge_nav_ratio=0.15):
                             "data": item.get("data"),
                             "target_page": item.get("target_page"),
                             "handled": True,
+                            "x": x,
+                            "y": y,
                         }
 
         # Standard element / button / card / tile hit
@@ -1039,7 +1045,8 @@ def hit_test(page, x, y, *, display=None, orientation=0, edge_nav_ratio=0.15):
 
         # Default action for tile or elements with entities is "toggle"
         if not action and ent:
-            action = "toggle"
+            domain = ent.split(".")[0]
+            action = "turn_on" if domain in ("scene", "script") else "toggle"
 
         is_tile = el_type in ("tile", "light_tile", "switch_tile", "sensor_tile", "climate_tile", "media_tile", "action_tile")
         if is_tile or action or ent or touch_cfg.get("service") or touch_cfg.get("target_page"):
@@ -1053,6 +1060,29 @@ def hit_test(page, x, y, *, display=None, orientation=0, edge_nav_ratio=0.15):
                 "data": touch_cfg.get("data") or el.get("data"),
                 "target_page": touch_cfg.get("target_page") or el.get("target_page"),
                 "handled": True,
+                "x": x,
+                "y": y,
+            }
+
+    # 2. Edge Tap Navigation ("Book Metaphor")
+    # Only triggered if tap lands in the outer gutter with no interactive element!
+    if edge_nav_ratio and edge_nav_ratio > 0:
+        edge_w = int(cw * float(edge_nav_ratio))
+        if x <= edge_w:
+            return {
+                "type": "nav_prev",
+                "edge": "left",
+                "handled": True,
+                "x": x,
+                "y": y,
+            }
+        if x >= cw - edge_w:
+            return {
+                "type": "nav_next",
+                "edge": "right",
+                "handled": True,
+                "x": x,
+                "y": y,
             }
 
     return {"type": "miss", "handled": False, "x": x, "y": y}
@@ -1067,6 +1097,10 @@ def collect_templates(page):
             tpl = template_for(el)
             if tpl and "{{" in tpl:
                 out[i] = tpl
+        elif el_type == "icon" and el.get("entity"):
+            ent = (el.get("entity") or "").strip()
+            if ent:
+                out[i] = f"{{{{ states('{binding._quote(ent)}') }}}}"
         elif el_type in ("tile", "light_tile", "switch_tile", "sensor_tile", "climate_tile", "media_tile", "action_tile"):
             ent = (el.get("entity") or "").strip()
             if ent:
