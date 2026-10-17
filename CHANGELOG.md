@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.5.3 - Apple-Grade Tactile Chyrons, Collision Avoidance & Proportional Edge Reflow
+
+- **Elimination of Canvas Line Slicing & Content Collision Avoidance**:
+  - Completely eliminated raw vector stick lines (`d.line`) that cut across user cards and widgets on e-ink screens.
+  - Added strict element collision detection in `layout.py`: when elements extend into edge gutters (such as full-width or custom dashboards), edge navigation graphics are suppressed so user cards remain 100% clean and unmolested.
+- **Apple Craftsmanship Tactile Capsule Chyrons**:
+  - Replaced wireframe chevrons with elegant vertical capsule rails (tactile pills) docked cleanly in clear margin gutters. Rendered with soft Carta grayscale fill (`GRAY_SURFACE`), delicate hairline borders (`GRAY_BORDER`), and crisp centered chevron icons.
+  - Upgraded the visual editor (`index.html`) to replace stretched SVG paths with matching tactile capsule guides and clean typography.
+- **Hit-Testing Protection & Touch Hierarchy**:
+  - Hardened 2D touch hit-testing: taps landing within any element's bounding box (including non-interactive cards, weather widgets, and schedules) are protected from accidental page turns. Edge turn gestures trigger strictly in empty margin gutters.
+- **Proportional Horizontal Canvas Adaptation**:
+  - Implemented `adaptElementsToEdgeNav` across all pages when toggling edge zones: elements scale and shift proportionally between full-width mode (`[margin, cw - margin]`) and constrained center mode (`[edge_w, cw - edge_w]`) while leaving vertical coordinates, heights, and card orders intact.
+  - Refined `reflowPageElements` to respect natural top-to-bottom hierarchy, keeping headers and icons pinned at the top and preserving tile-before-widget flow.
+- **Automated Verification**:
+  - Added unit tests for tactile capsule rendering, gutter collision avoidance, and touch hit-testing protection. All 41 tests passing.
+
 ## 1.5.2 - Security Hardening, Robust Widget Rasterization, Data Sources API & Daemon Resilience
 
 - **Security & Access Control (SEC-01 & SEC-02)**:

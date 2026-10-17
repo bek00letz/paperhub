@@ -479,56 +479,64 @@ main {
   top: 0;
   bottom: 0;
   width: 15%;
-  background: rgba(0, 0, 0, 0.03);
-  border-right: 1.5px dashed rgba(0, 0, 0, 0.22);
+  background: rgba(0, 0, 0, 0.02);
+  border-right: 1.5px dashed rgba(0, 0, 0, 0.18);
   pointer-events: none;
   z-index: 100;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
   user-select: none;
 }
 .edge-turn-zone.edge-right {
   right: 0;
   border-right: none;
-  border-left: 1.5px dashed rgba(0, 0, 0, 0.22);
+  border-left: 1.5px dashed rgba(0, 0, 0, 0.18);
 }
-.edge-chevron-svg {
-  width: 65%;
-  height: 50%;
-  max-height: 50%;
-  color: rgba(0, 0, 0, 0.45);
-  filter: drop-shadow(0 1px 2px rgba(255, 255, 255, 0.8));
-  transition: transform 0.2s cubic-bezier(0.25, 1, 0.5, 1), color 0.2s ease;
+.edge-rail-pill {
+  width: 38px;
+  height: 38%;
+  max-height: 340px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 9999px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(8px);
+  transition: transform 0.2s cubic-bezier(0.25, 1, 0.5, 1);
 }
-.edge-turn-zone:hover .edge-chevron-svg {
-  color: rgba(0, 0, 0, 0.8);
-  transform: scale(1.04);
+.edge-rail-icon {
+  width: 18px;
+  height: 18px;
+  color: #333333;
 }
-body.dark-mode .edge-chevron-svg {
-  color: rgba(255, 255, 255, 0.45);
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
-}
-body.dark-mode .edge-turn-zone:hover .edge-chevron-svg {
-  color: rgba(255, 255, 255, 0.85);
-}
-.edge-label {
+.edge-rail-label {
   writing-mode: vertical-rl;
   transform: rotate(180deg);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #333333;
-  opacity: 0.75;
-  background: rgba(255, 255, 255, 0.9);
-  padding: 6px 3px;
-  border-radius: 4px;
+  color: #666666;
 }
-body.dark-mode .edge-label {
+body.dark-mode .edge-turn-zone {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+body.dark-mode .edge-rail-pill {
+  background: rgba(36, 36, 36, 0.88);
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+body.dark-mode .edge-rail-icon {
   color: #eeeeee;
-  background: rgba(30, 30, 30, 0.9);
+}
+body.dark-mode .edge-rail-label {
+  color: #aaaaaa;
 }
 
 /* Tactile Touch Badge on Canvas Elements */
@@ -1241,16 +1249,20 @@ aside {
       <div id="canvas-housing">
         <div id="canvas">
           <div class="edge-turn-zone edge-left">
-            <svg class="edge-chevron-svg" viewBox="0 0 100 400" preserveAspectRatio="none">
-              <path d="M 70 20 L 25 200 L 70 380" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <span class="edge-label">PREV PAGE</span>
+            <div class="edge-rail-pill">
+              <svg class="edge-rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M 15 6 L 9 12 L 15 18" />
+              </svg>
+              <span class="edge-rail-label">PREV</span>
+            </div>
           </div>
           <div class="edge-turn-zone edge-right">
-            <svg class="edge-chevron-svg" viewBox="0 0 100 400" preserveAspectRatio="none">
-              <path d="M 30 20 L 75 200 L 30 380" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <span class="edge-label">NEXT PAGE</span>
+            <div class="edge-rail-pill">
+              <svg class="edge-rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M 9 6 L 15 12 L 9 18" />
+              </svg>
+              <span class="edge-rail-label">NEXT</span>
+            </div>
           </div>
           <div class="safe-zone safe-footer"><span id="safefootertag" class="safe-tag" style="right:8px;top:4px">footer zone</span></div>
           <div class="safe-zone safe-lock"><span class="safe-tag" style="right:4px;bottom:4px">lock</span></div>
@@ -2005,6 +2017,47 @@ function syncOrientUI() {
   }
 }
 
+/* Smooth proportional adaptation when toggling edge turn zones */
+function adaptElementsToEdgeNav(p, toEdgeActive) {
+  const list = p && p.elements;
+  if (!Array.isArray(list) || !list.length) return;
+
+  const disp = curDisplay();
+  const TW = curW();
+  const margin = Math.max(16, disp.margin || 32);
+  const edgeW = Math.round(TW * parseFloat(spec.edge_nav_ratio || 0.15));
+
+  let srcLeft, srcRight, dstLeft, dstRight;
+  if (toEdgeActive) {
+    srcLeft = margin;
+    srcRight = TW - margin;
+    dstLeft = Math.max(edgeW, margin);
+    dstRight = Math.min(TW - edgeW, TW - margin);
+  } else {
+    srcLeft = Math.max(edgeW, margin);
+    srcRight = Math.min(TW - edgeW, TW - margin);
+    dstLeft = margin;
+    dstRight = TW - margin;
+  }
+
+  const srcUsable = Math.max(1, srcRight - srcLeft);
+  const dstUsable = Math.max(1, dstRight - dstLeft);
+
+  list.forEach(el => {
+    const relX = (el.x - srcLeft) / srcUsable;
+    const relW = el.w / srcUsable;
+    let newX = Math.round(dstLeft + relX * dstUsable);
+    let newW = Math.max(16, Math.round(relW * dstUsable));
+
+    newX = Math.max(dstLeft, Math.min(dstRight - newW, newX));
+    if (newX + newW > dstRight) {
+      newW = Math.max(16, dstRight - newX);
+    }
+    el.x = newX;
+    el.w = newW;
+  });
+}
+
 /* Page reflow between orientations and canvas dimensions */
 function reflowPageElements(p, toPortrait) {
   const list = p && p.elements;
@@ -2044,42 +2097,92 @@ function reflowPageElements(p, toPortrait) {
     return;
   }
 
-  // Modern Tiles & Widgets Dashboard Reflow
+  // Modern Tiles & Widgets Dashboard Reflow: Respect natural top-to-bottom order and headers
   if (tiles.length || widgets.length) {
-    let cursorY = Math.round(TH * 0.04);
     const gap = TW >= 1200 ? 20 : 14;
 
-    // Place widgets first (full width)
-    widgets.forEach(w => {
-      w.x = leftBound;
-      w.y = cursorY;
-      w.w = usableW;
-      if (w.type === "calendar_timeline") w.h = Math.min(360, Math.round(safeH * 0.38));
-      else if (w.type === "flight_tracker" || w.type === "flight_radar") w.h = Math.min(360, Math.round(safeH * 0.35));
-      else if (w.type === "sports_racing") w.h = Math.min(360, Math.round(safeH * 0.35));
-      else if (w.type === "sports_match") w.h = Math.min(300, Math.round(safeH * 0.28));
-      else w.h = Math.min(280, Math.round(safeH * 0.30));
-      cursorY += w.h + gap;
+    const topItemY = Math.min(
+      ...(tiles.length ? tiles.map(t => t.y) : [Infinity]),
+      ...(widgets.length ? widgets.map(w => w.y) : [Infinity])
+    );
+    const headerTexts = texts.filter(t => t.y < topItemY);
+    headerTexts.forEach(t => {
+      t.x = leftBound;
+      t.w = Math.min(t.w, usableW);
+    });
+    const headerIcons = icons.filter(ic => ic.y < topItemY);
+    headerIcons.forEach(ic => {
+      ic.x = rightBound - ic.w;
     });
 
-    // Responsive multi-column layout for tiles
-    let cols = 1;
-    if (usableW >= 1200) cols = 4;
-    else if (usableW >= 880) cols = 3;
-    else if (usableW >= 540) cols = 2;
-    else cols = 1;
+    let cursorY = headerTexts.length ? Math.max(...headerTexts.map(t => t.y + t.h)) + gap : Math.round(TH * 0.04);
 
-    const tileW = Math.floor((usableW - (cols - 1) * gap) / cols);
-    const tileH = TW >= 1200 ? 150 : (TW >= 800 ? 138 : 124);
+    const firstTileY = tiles.length ? Math.min(...tiles.map(t => t.y)) : Infinity;
+    const firstWidgetY = widgets.length ? Math.min(...widgets.map(w => w.y)) : Infinity;
 
-    tiles.forEach((t, idx) => {
-      const col = idx % cols;
-      const row = Math.floor(idx / cols);
-      t.x = leftBound + col * (tileW + gap);
-      t.y = cursorY + row * (tileH + gap);
-      t.w = tileW;
-      t.h = tileH;
-    });
+    if (firstTileY <= firstWidgetY) {
+      let cols = 1;
+      if (usableW >= 1200) cols = 4;
+      else if (usableW >= 880) cols = 3;
+      else if (usableW >= 540) cols = 2;
+      else cols = 1;
+
+      const tileW = Math.floor((usableW - (cols - 1) * gap) / cols);
+      const tileH = TW >= 1200 ? 150 : (TW >= 800 ? 138 : 124);
+
+      tiles.forEach((t, idx) => {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        t.x = leftBound + col * (tileW + gap);
+        t.y = cursorY + row * (tileH + gap);
+        t.w = tileW;
+        t.h = tileH;
+      });
+      const tileRows = Math.ceil(tiles.length / cols);
+      cursorY += tileRows * (tileH + gap);
+
+      widgets.forEach(w => {
+        w.x = leftBound;
+        w.y = cursorY;
+        w.w = usableW;
+        if (w.type === "calendar_timeline") w.h = Math.min(360, Math.round(safeH * 0.38));
+        else if (w.type === "flight_tracker" || w.type === "flight_radar") w.h = Math.min(360, Math.round(safeH * 0.35));
+        else if (w.type === "sports_racing") w.h = Math.min(360, Math.round(safeH * 0.35));
+        else if (w.type === "sports_match") w.h = Math.min(300, Math.round(safeH * 0.28));
+        else w.h = Math.min(280, Math.round(safeH * 0.30));
+        cursorY += w.h + gap;
+      });
+    } else {
+      widgets.forEach(w => {
+        w.x = leftBound;
+        w.y = cursorY;
+        w.w = usableW;
+        if (w.type === "calendar_timeline") w.h = Math.min(360, Math.round(safeH * 0.38));
+        else if (w.type === "flight_tracker" || w.type === "flight_radar") w.h = Math.min(360, Math.round(safeH * 0.35));
+        else if (w.type === "sports_racing") w.h = Math.min(360, Math.round(safeH * 0.35));
+        else if (w.type === "sports_match") w.h = Math.min(300, Math.round(safeH * 0.28));
+        else w.h = Math.min(280, Math.round(safeH * 0.30));
+        cursorY += w.h + gap;
+      });
+
+      let cols = 1;
+      if (usableW >= 1200) cols = 4;
+      else if (usableW >= 880) cols = 3;
+      else if (usableW >= 540) cols = 2;
+      else cols = 1;
+
+      const tileW = Math.floor((usableW - (cols - 1) * gap) / cols);
+      const tileH = TW >= 1200 ? 150 : (TW >= 800 ? 138 : 124);
+
+      tiles.forEach((t, idx) => {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        t.x = leftBound + col * (tileW + gap);
+        t.y = cursorY + row * (tileH + gap);
+        t.w = tileW;
+        t.h = tileH;
+      });
+    }
     return;
   }
 
@@ -3967,8 +4070,9 @@ $("safebtn").onclick = () => {
 if ($("edgenavbtn")) {
   $("edgenavbtn").onclick = async () => {
     snapshot();
-    spec.edge_nav = spec.edge_nav === false ? true : false;
-    reflowPageElements(page(), isPortrait());
+    const willBeActive = spec.edge_nav === false;
+    spec.edge_nav = willBeActive;
+    Object.values(spec.pages || {}).forEach(p => adaptElementsToEdgeNav(p, willBeActive));
     syncOrientUI();
     paint(); preview();
     await saveLayouts();

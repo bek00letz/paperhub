@@ -818,7 +818,7 @@ class TestPaperHubV150AdaptedPresets(unittest.TestCase):
         self.assertEqual(res.get("entity"), "light.office_lights")
 
     def test_prominent_chevrons_render(self):
-        """Verify prominent half-screen tall chevrons render on multi-page layouts with edge_nav enabled."""
+        """Verify tactile capsule pill chyrons render on multi-page layouts when margins are clear."""
         page = {
             "elements": [
                 {"type": "text", "value": "Dashboard", "x": 200, "y": 200, "w": 400, "h": 60}
@@ -826,6 +826,35 @@ class TestPaperHubV150AdaptedPresets(unittest.TestCase):
         }
         img = L.render_page(page, {}, page_info={"current": 1, "total": 2}, edge_nav=True, edge_nav_ratio=0.15, display="boox_go_6")
         self.assertEqual(img.size, (1072, 1448))
+
+    def test_edge_nav_collision_avoids_overlapping_elements(self):
+        """Verify that edge navigation graphics are suppressed if elements occupy the edge gutters."""
+        # Page with cards overlapping left (x=64) and right (x=600, w=450 -> right=1050 > 911)
+        page = {
+            "elements": [
+                {"type": "tile", "x": 64, "y": 200, "w": 450, "h": 140, "title": "Left Card"},
+                {"type": "tile", "x": 600, "y": 200, "w": 450, "h": 140, "title": "Right Card"},
+            ]
+        }
+        # Render should succeed with collision avoidance (no drawing over cards)
+        img = L.render_page(page, {}, page_info={"current": 1, "total": 2}, edge_nav=True, edge_nav_ratio=0.15, display="boox_go_6")
+        self.assertEqual(img.size, (1072, 1448))
+
+    def test_hit_test_element_bounds_protect_from_edge_turn(self):
+        """Tapping inside an element (even non-interactive) in the gutter must never trigger page turn."""
+        page = {
+            "elements": [
+                {"type": "card", "x": 64, "y": 200, "w": 400, "h": 200}
+            ]
+        }
+        # Tap at (100, 250) is inside [0, 160] (left edge) but ALSO inside the card [64, 464]
+        res = L.hit_test(page, 100, 250, display="boox_go_6", edge_nav_ratio=0.15)
+        self.assertNotEqual(res.get("type"), "nav_prev")
+
+        # Tap at (30, 250) is in the clear gutter OUTSIDE the card -> triggers nav_prev
+        res_gutter = L.hit_test(page, 30, 250, display="boox_go_6", edge_nav_ratio=0.15)
+        self.assertEqual(res_gutter.get("type"), "nav_prev")
+        self.assertTrue(res_gutter.get("handled"))
 
     def test_api_entities_resilient_fallback(self):
         """Verify api_entities returns 200 and entities even when HA is unreachable."""

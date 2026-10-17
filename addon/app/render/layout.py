@@ -1530,28 +1530,48 @@ def render_page(
             print(f"[PaperHub] Warning: element {i} ({el_type}) failed to render: {exc!r}", flush=True)
             continue
 
-    # Prominent book-turn navigation chevrons (half the screen tall & edge-width wide)
+    # Apple Craftsmanship Navigation Affordance (Tactile edge gutter chyrons)
     if edge_nav and edge_nav_ratio > 0 and page_info and page_info.get("total", 1) > 1:
         cw, ch = T.canvas_dims(orientation, display)
         edge_w = int(cw * float(edge_nav_ratio))
-        chev_h = int(ch * 0.50)  # exactly half the screen tall
-        chev_w = max(16, int(edge_w * 0.55))  # edge-width wide
         mid_y = ch // 2
-        top_y = mid_y - chev_h // 2
-        bot_y = mid_y + chev_h // 2
-        stroke_w = max(4, min(14, int(cw * 0.007)))
 
-        # Left Chevron (points left <) centered in left edge zone [0, edge_w]
-        left_cx = edge_w // 2
-        left_tip_x = max(stroke_w + 4, left_cx - chev_w // 2)
-        left_arm_x = min(edge_w - stroke_w - 4, left_tip_x + chev_w)
-        d.line([(left_arm_x, top_y), (left_tip_x, mid_y), (left_arm_x, bot_y)], fill=T.GRAY_MID, width=stroke_w, joint="curve")
+        # Strict Collision Check: Never draw navigation graphics over user content!
+        left_has_collision = False
+        right_has_collision = False
+        for el in page.get("elements", []):
+            ex, ey, ew, eh = _clamp_box(el, display=display, orientation=orientation)
+            if ex < edge_w and (ex + ew) > 0:
+                left_has_collision = True
+            if (ex + ew) > (cw - edge_w) and ex < cw:
+                right_has_collision = True
 
-        # Right Chevron (points right >) centered in right edge zone [cw - edge_w, cw]
-        right_cx = cw - edge_w // 2
-        right_tip_x = min(cw - stroke_w - 4, right_cx + chev_w // 2)
-        right_arm_x = max(cw - edge_w + stroke_w + 4, right_tip_x - chev_w)
-        d.line([(right_arm_x, top_y), (right_tip_x, mid_y), (right_arm_x, bot_y)], fill=T.GRAY_MID, width=stroke_w, joint="curve")
+        pill_w = max(24, min(56, int(edge_w * 0.42)))
+        pill_h = min(int(ch * 0.35), 440)
+        pill_r = pill_w // 2
+        chev_span = max(8, min(14, int(pill_w * 0.36)))
+        chev_h = max(14, min(24, int(chev_span * 1.8)))
+        stroke_w = max(2, min(5, int(pill_w * 0.10)))
+
+        # Left Gutter Tactile Pill & Chevron (Only if margin is clear of elements)
+        if not left_has_collision and edge_w >= 32:
+            cx = edge_w // 2
+            px0, px1 = cx - pill_w // 2, cx + pill_w // 2
+            py0, py1 = mid_y - pill_h // 2, mid_y + pill_h // 2
+            d.rounded_rectangle([(px0, py0), (px1, py1)], radius=pill_r, fill=T.GRAY_SURFACE, outline=T.GRAY_BORDER, width=1)
+            tip_x = cx - chev_span // 2
+            arm_x = tip_x + chev_span
+            d.line([(arm_x, mid_y - chev_h), (tip_x, mid_y), (arm_x, mid_y + chev_h)], fill=T.GRAY_DARK, width=stroke_w, joint="curve")
+
+        # Right Gutter Tactile Pill & Chevron (Only if margin is clear of elements)
+        if not right_has_collision and edge_w >= 32:
+            cx = cw - edge_w // 2
+            px0, px1 = cx - pill_w // 2, cx + pill_w // 2
+            py0, py1 = mid_y - pill_h // 2, mid_y + pill_h // 2
+            d.rounded_rectangle([(px0, py0), (px1, py1)], radius=pill_r, fill=T.GRAY_SURFACE, outline=T.GRAY_BORDER, width=1)
+            tip_x = cx + chev_span // 2
+            arm_x = tip_x - chev_span
+            d.line([(arm_x, mid_y - chev_h), (tip_x, mid_y), (arm_x, mid_y + chev_h)], fill=T.GRAY_DARK, width=stroke_w, joint="curve")
 
     # Ambient footer with time, page dots, battery
     T.footer(
@@ -1650,25 +1670,36 @@ def hit_test(page, x, y, *, display=None, orientation=0, edge_nav_ratio=0.15):
             }
 
     # 2. Edge Tap Navigation ("Book Metaphor")
-    # Only triggered if tap lands in the outer gutter with no interactive element!
+    # Only triggered if tap lands in the dedicated outer gutter AND not within any element's bounds!
     if edge_nav_ratio and edge_nav_ratio > 0:
         edge_w = int(cw * float(edge_nav_ratio))
-        if x <= edge_w:
-            return {
-                "type": "nav_prev",
-                "edge": "left",
-                "handled": True,
-                "x": x,
-                "y": y,
-            }
-        if x >= cw - edge_w:
-            return {
-                "type": "nav_next",
-                "edge": "right",
-                "handled": True,
-                "x": x,
-                "y": y,
-            }
+        in_left_edge = (x <= edge_w)
+        in_right_edge = (x >= cw - edge_w)
+        if in_left_edge or in_right_edge:
+            # Tap within any element's bounds must never be hijacked by edge navigation
+            hit_any_el = False
+            for el in elements:
+                ex, ey, ew, eh = _clamp_box(el, display=display, orientation=orientation)
+                if ex <= x <= ex + ew and ey <= y <= ey + eh:
+                    hit_any_el = True
+                    break
+            if not hit_any_el:
+                if in_left_edge:
+                    return {
+                        "type": "nav_prev",
+                        "edge": "left",
+                        "handled": True,
+                        "x": x,
+                        "y": y,
+                    }
+                else:
+                    return {
+                        "type": "nav_next",
+                        "edge": "right",
+                        "handled": True,
+                        "x": x,
+                        "y": y,
+                    }
 
     return {"type": "miss", "handled": False, "x": x, "y": y}
 
