@@ -29,7 +29,23 @@ sys.path.insert(0, str(Path(__file__).parent))
 import feeds  # noqa: E402
 from render import layout, theme as T, binding  # noqa: E402
 
-DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
+def _resolve_data_dir() -> Path:
+    env_dir = os.environ.get("DATA_DIR")
+    if env_dir:
+        p = Path(env_dir)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    default_dir = Path("/data")
+    try:
+        default_dir.mkdir(parents=True, exist_ok=True)
+        return default_dir
+    except (PermissionError, OSError):
+        local_dir = Path(__file__).parent / "data"
+        local_dir.mkdir(parents=True, exist_ok=True)
+        return local_dir
+
+
+DATA_DIR = _resolve_data_dir()
 WEB_DIR = Path(__file__).parent / "web"
 HA_BASE = (os.environ.get("HA_BASE") or "http://supervisor/core").rstrip("/")
 HA_TOKEN = (os.environ.get("HA_TOKEN") or "").strip()
@@ -100,6 +116,29 @@ def eval_fixture_template(tpl: str) -> str:
         expr = s[2:-2].strip()
     else:
         expr = s
+
+    if "to_json" in expr:
+        m_cal = re.search(r"states\('([^']*(?:calendar)[^']*)'\)", expr)
+        if m_cal:
+            eid = m_cal.group(1)
+            st = states.get(eid) or {}
+            return json.dumps({
+                "state": st.get("state", "on"),
+                "message": st.get("message", "Calendar Event"),
+                "start_time": st.get("start_time", "10:00"),
+                "end_time": st.get("end_time", "11:00"),
+                "location": st.get("location", ""),
+                "events": st.get("events", []),
+            })
+        m_wea = re.search(r"states\('([^']*(?:weather)[^']*)'\)", expr)
+        if m_wea:
+            eid = m_wea.group(1)
+            st = states.get(eid) or {}
+            return json.dumps({
+                "temperature": st.get("temperature", 21.5),
+                "condition": st.get("condition") or st.get("state", "partlycloudy"),
+                "forecast": st.get("forecast", []),
+            })
 
     # Handle `is_state('entity', 'val')`
     m = re.match(r"^is_state\(\s*'([^']+)'\s*,\s*'([^']+)'\s*\)$", expr)
@@ -253,6 +292,7 @@ class DeviceSession:
         self.last_seen = time.time()
         self.version = 1
         self.frame_png = b""
+        self.frame_bmp = b""
         self.etag = ""
         self.subscribers: set[asyncio.Queue] = set()
 
@@ -359,7 +399,9 @@ async def render_device_frame(session, dev: DeviceSession, spec: dict) -> bytes:
         img = T.orient_for_panel(img, dev.orientation)
 
     png_bytes = _png(img)
+    bmp_bytes = T.to_1bit_bmp(img)
     dev.frame_png = png_bytes
+    dev.frame_bmp = bmp_bytes
     dev.etag = hashlib.sha256(png_bytes).hexdigest()[:16]
     return png_bytes
 
@@ -454,7 +496,7 @@ def check_token(request):
 
 
 async def frame_png(request):
-    """Serve crisp 16-level grayscale PNG for e-reader display."""
+    """Serve crisp 16-level grayscale PNG for e-reader display with ETag caching."""
     if not check_token(request):
         return web.Response(status=403, text="Forbidden")
 
@@ -465,19 +507,108 @@ async def frame_png(request):
         spec = load_layouts()
         await render_device_frame(SHARED_SESSION, dev, spec)
 
-    if request.headers.get("If-None-Match") == dev.etag:
-        return web.Response(status=304)
+    if_none = (request.headers.get("If-None-Match") or "").strip('" ')
+    if if_none and if_none == dev.etag:
+        return web.Response(status=304, headers={"ETag": f'"{dev.etag}"', "Cache-Control": "no-cache"})
 
     return web.Response(
         body=dev.frame_png,
         content_type="image/png",
         headers={
-            "ETag": dev.etag,
+            "ETag": f'"{dev.etag}"',
             "Cache-Control": "no-cache, must-revalidate",
             "X-PaperHub-Version": str(dev.version),
             "X-PaperHub-Page": dev.active_page,
         },
     )
+
+
+async def frame_bmp(request):
+    """Serve 1-bit monochrome BMP for ESP32/TRMNL e-readers with ETag caching."""
+    if not check_token(request):
+        return web.Response(status=403, text="Forbidden")
+
+    dev_id = request.match_info.get("device_id") or request.query.get("device", "default")
+    dev = DEVICES.get_or_create(dev_id)
+
+    if not dev.frame_bmp or request.query.get("force"):
+        spec = load_layouts()
+        await render_device_frame(SHARED_SESSION, dev, spec)
+
+    if_none = (request.headers.get("If-None-Match") or "").strip('" ')
+    if if_none and if_none == dev.etag:
+        return web.Response(status=304, headers={"ETag": f'"{dev.etag}"', "Cache-Control": "no-cache"})
+
+    return web.Response(
+        body=dev.frame_bmp,
+        content_type="image/bmp",
+        headers={
+            "ETag": f'"{dev.etag}"',
+            "Cache-Control": "no-cache, must-revalidate",
+            "X-PaperHub-Version": str(dev.version),
+            "X-PaperHub-Page": dev.active_page,
+        },
+    )
+
+
+async def api_trmnl(request):
+    """TRMNL Open Webhook & Display Endpoint.
+    
+    Compatible with TRMNL native firmware, TRMNL BYOS (Bring Your Own Server),
+    and custom ESP32 e-ink polling devices.
+    """
+    dev_id = (
+        request.headers.get("ID")
+        or request.headers.get("Mac-Address")
+        or request.headers.get("Access-Token")
+        or request.match_info.get("device_id")
+        or request.query.get("device")
+        or "trmnl_default"
+    )
+    dev_id = re.sub(r"[^a-zA-Z0-9_-]+", "", str(dev_id).strip()) or "trmnl_default"
+
+    if dev_id not in DEVICES.devices:
+        dev = DEVICES.get_or_create(dev_id)
+        dev.display = "trmnl_og"
+        dev.name = f"TRMNL {dev_id[-6:] if len(dev_id) >= 6 else dev_id}"
+        DEVICES.save()
+    else:
+        dev = DEVICES.get_or_create(dev_id)
+
+    bat_volt = request.headers.get("Battery-Voltage")
+    if bat_volt:
+        try:
+            v = float(bat_volt)
+            pct = int(round(max(0.0, min(100.0, (v - 3.3) / 0.9 * 100.0))))
+            dev.battery_pct = pct
+        except (ValueError, TypeError):
+            pass
+
+    if not dev.frame_bmp or not dev.frame_png or request.query.get("force"):
+        spec = load_layouts()
+        await render_device_frame(SHARED_SESSION, dev, spec)
+
+    accept = request.headers.get("Accept", "")
+    fmt = request.query.get("format", "")
+    if "image/bmp" in accept or fmt == "bmp":
+        return await frame_bmp(request)
+    if "image/png" in accept or fmt == "png":
+        return await frame_png(request)
+
+    host = request.headers.get("Host") or f"127.0.0.1:{FRAME_PORT}"
+    proto = request.headers.get("X-Forwarded-Proto") or "http"
+    base_url = f"{proto}://{host}"
+
+    refresh_rate = int(os.environ.get("REFRESH_SECONDS", "300") or 300)
+    payload = {
+        "status": 0,
+        "image_url": f"{base_url}/api/devices/{dev.device_id}/frame.bmp?v={dev.version}",
+        "filename": "display.bmp",
+        "refresh_rate": refresh_rate,
+        "reset_firmware": False,
+        "update_firmware": False,
+    }
+    return web.json_response(payload)
 
 
 async def api_touch(request):
@@ -734,12 +865,20 @@ async def start_app(app_runners):
     panel = web.Application()
     panel.add_routes([
         web.get("/frame.png", frame_png),
+        web.get("/frame.bmp", frame_bmp),
         web.get("/api/devices/{device_id}/frame.png", frame_png),
+        web.get("/api/devices/{device_id}/frame.bmp", frame_bmp),
         web.get("/api/devices/{device_id}/events", api_device_events),
         web.post("/api/touch", api_touch),
         web.get("/api/touch", api_touch),
         web.post("/api/devices/{device_id}/touch", api_touch),
         web.get("/api/devices/{device_id}/touch", api_touch),
+        web.get("/api/trmnl", api_trmnl),
+        web.post("/api/trmnl", api_trmnl),
+        web.get("/api/trmnl/display", api_trmnl),
+        web.post("/api/trmnl/display", api_trmnl),
+        web.get("/api/devices/{device_id}/trmnl", api_trmnl),
+        web.post("/api/devices/{device_id}/trmnl", api_trmnl),
         web.get("/kiosk", kiosk_html),
         web.get("/kiosk/{device_id}", kiosk_html),
     ])
@@ -751,12 +890,20 @@ async def start_app(app_runners):
         web.get("/kiosk", kiosk_html),
         web.get("/kiosk/{device_id}", kiosk_html),
         web.get("/frame.png", frame_png),
+        web.get("/frame.bmp", frame_bmp),
         web.get("/api/devices/{device_id}/frame.png", frame_png),
+        web.get("/api/devices/{device_id}/frame.bmp", frame_bmp),
         web.get("/api/devices/{device_id}/events", api_device_events),
         web.post("/api/touch", api_touch),
         web.get("/api/touch", api_touch),
         web.post("/api/devices/{device_id}/touch", api_touch),
         web.get("/api/devices/{device_id}/touch", api_touch),
+        web.get("/api/trmnl", api_trmnl),
+        web.post("/api/trmnl", api_trmnl),
+        web.get("/api/trmnl/display", api_trmnl),
+        web.post("/api/trmnl/display", api_trmnl),
+        web.get("/api/devices/{device_id}/trmnl", api_trmnl),
+        web.post("/api/devices/{device_id}/trmnl", api_trmnl),
         web.get("/api/status", api_status),
         web.get("/api/displays", api_displays),
         web.get("/api/layouts", api_layouts_get),

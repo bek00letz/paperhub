@@ -13,7 +13,36 @@
     "sensor.epaper_watch_count":     {"state": "2", "unit": null, "friendly_name": "Next to watch count"},
     "timer.dryer_cycle":             {"state": "idle", "unit": null, "friendly_name": "Dryer Timer", "remaining": "0:42:00", "duration": "1:00:00"},
     "person.partner":                {"state": "home", "unit": null, "friendly_name": "Partner", "in_zones": ["zone.home"]},
-    "sensor.partner_distance":       {"state": "450", "unit": "m", "friendly_name": "Partner Distance"}
+    "sensor.partner_distance":       {"state": "450", "unit": "m", "friendly_name": "Partner Distance"},
+    "calendar.personal": {
+      "state": "on",
+      "friendly_name": "Family Schedule",
+      "message": "Design Sync & Planning",
+      "start_time": "2026-10-17 10:00:00",
+      "end_time": "2026-10-17 11:30:00",
+      "location": "Boardroom / Zoom",
+      "events": [
+        {"summary": "Morning Design Sync", "start": "09:30", "end": "10:45", "location": "Studio 4", "ongoing": true},
+        {"summary": "Home Architecture Review", "start": "13:00", "end": "14:15", "location": "Lab B"},
+        {"summary": "Family Dinner & Reading", "start": "18:30", "end": "20:00", "location": "Living Room"}
+      ]
+    },
+    "weather.home": {
+      "state": "partlycloudy",
+      "friendly_name": "Home Weather",
+      "temperature": 21.5,
+      "temperature_unit": "°C",
+      "condition": "partlycloudy",
+      "humidity": 55,
+      "wind_speed": 12,
+      "forecast": [
+        {"datetime": "2026-10-17T12:00:00+00:00", "condition": "partlycloudy", "temperature": 22, "templow": 13, "precipitation_probability": 10},
+        {"datetime": "2026-10-18T12:00:00+00:00", "condition": "sunny", "temperature": 24, "templow": 14, "precipitation_probability": 0},
+        {"datetime": "2026-10-19T12:00:00+00:00", "condition": "rainy", "temperature": 18, "templow": 11, "precipitation_probability": 75},
+        {"datetime": "2026-10-20T12:00:00+00:00", "condition": "cloudy", "temperature": 19, "templow": 12, "precipitation_probability": 20},
+        {"datetime": "2026-10-21T12:00:00+00:00", "condition": "lightning-rainy", "temperature": 16, "templow": 10, "precipitation_probability": 90}
+      ]
+    }
   },
   "pv_curve_w": [1.8, 1.8, 1.0, 2.0, 2.1, 2.1, 1.1, 13.1, 219.1, 817.7, 806.7, 738.4,
                  1038.7, 1398.7, 2905.8, 1710.6, 563.4, 342.0, 70.1],

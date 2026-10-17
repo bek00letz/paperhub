@@ -4,6 +4,7 @@ Supports high-DPI consumer e-readers (Onyx Boox, Kindle Paperwhite, Kobo,
 reMarkable) with 300 PPI Carta screens and true 4-bit (16-level) grayscale
 rendering, concentric geometry, and tactile ambient shadows.
 """
+import io
 from functools import lru_cache
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
@@ -125,6 +126,35 @@ DISPLAYS = {
         "touch": True,
         "edge_nav_ratio": 0.15,
     },
+    # TRMNL 7.5" (120 PPI) - Low-power ambient e-ink dashboard
+    "trmnl_og": {
+        "id": "trmnl_og",
+        "name": "TRMNL 7.5\" (800×480)",
+        "category": "ereader",
+        "w": 800,
+        "h": 480,
+        "ppi": 120,
+        "diagonal_in": 7.5,
+        "mm_w": 163.2,
+        "mm_h": 97.9,
+        "margin": 32,
+        "touch": False,
+        "edge_nav_ratio": 0.0,
+    },
+    "trmnl_x": {
+        "id": "trmnl_x",
+        "name": "TRMNL X 10.3\" (1872×1404)",
+        "category": "tablet",
+        "w": 1872,
+        "h": 1404,
+        "ppi": 227,
+        "diagonal_in": 10.3,
+        "mm_w": 209.7,
+        "mm_h": 157.2,
+        "margin": 64,
+        "touch": False,
+        "edge_nav_ratio": 0.0,
+    },
     # CrowPanel 5.79" SPI strip (legacy backwards compatibility)
     "crowpanel_579": {
         "id": "crowpanel_579",
@@ -163,6 +193,9 @@ def get_display(key=None):
         "scribe": "kindle_scribe",
         "note_air": "boox_note_air",
         "remarkable": "remarkable_2",
+        "trmnl": "trmnl_og",
+        "trmnl_og": "trmnl_og",
+        "trmnl_x": "trmnl_x",
         "crowpanel": "crowpanel_579",
     }
     target = alias_map.get(k)
@@ -236,6 +269,19 @@ def font(size, bold=True, family="lato"):
     return _cached_font(path, clamped)
 
 
+def best_font_for_text(text: str, size: int, bold: bool = True, family: str = "lato"):
+    """Select the best font for the given text with multilingual fallback.
+    
+    If text contains characters outside Latin-1 (e.g. Cyrillic, Greek, Ukrainian,
+    or special symbols/arrows like →, ★, ●), automatically falls back to DejaVuSans
+    which contains over 6,200 glyphs, preventing square missing glyph boxes (□).
+    """
+    s = str(text or "")
+    if any(ord(c) >= 256 for c in s):
+        return font(size, bold=bold, family="dejavu")
+    return font(size, bold=bold, family=family)
+
+
 def canvas_dims(orientation=0, display=None):
     """Logical (width, height) for the editor and renderer before panel rotation."""
     disp = get_display(display)
@@ -266,6 +312,18 @@ def to_16grayscale(img):
 def to_1bit(img):
     """Hard threshold to 1-bit monochrome (for legacy 1-bit panels or fast previews)."""
     return img.convert("1", dither=Image.Dither.NONE)
+
+
+def to_1bit_bmp(img):
+    """Convert image to 1-bit monochrome BMP bytes for ESP32/TRMNL direct line streaming.
+    
+    TRMNL and low-memory microcontrollers render 1-bit BMP with zero decompression overhead.
+    Uses Floyd-Steinberg dithering on photographic/gradient content or clean thresholding.
+    """
+    mono = img.convert("1", dither=Image.Dither.FLOYDSTEINBERG if img.mode == "L" else Image.Dither.NONE)
+    buf = io.BytesIO()
+    mono.save(buf, format="BMP")
+    return buf.getvalue()
 
 
 def orient_for_panel(img, orientation=0):

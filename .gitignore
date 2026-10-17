@@ -12,6 +12,7 @@ ENV/
 
 # Temporary data
 /data/
+addon/app/data/
 *.tmp
 *.log
 .DS_Store

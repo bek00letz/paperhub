@@ -27,9 +27,20 @@ Rather than coarse 1-bit dithering, PaperHub implements a true 4-bit (16-level) 
 - **6.0″ Carta (Boox Go 6, Kindle Paperwhite 11th Gen, Kobo Clara)**: 1072 × 1448 (300 PPI)
 - **7.0″ Carta (Boox Page, Kindle Oasis, Kobo Libra)**: 1264 × 1680 (300 PPI)
 - **10.3″ Mobius/Carta (Boox Note Air, Kindle Scribe, reMarkable 2)**: 1404 × 1872 / 1860 × 2480 (227–300 PPI)
+- **TRMNL E-Ink Displays**: TRMNL OG (800 × 480, 120 PPI) & TRMNL X (1872 × 1404, 227 PPI)
 - **Apple Craftsmanship Geometry**: Concentric corner radii ($R_{\text{inner}} = R_{\text{outer}} - \text{padding}$), delicate hairline borders, and ambient drop-shadows.
+- **Multilingual Font Fallback**: Automatic glyph fallback to `DejaVuSans` for Cyrillic, Greek, math, and symbols (`★`, `→`, `℃`), eliminating empty square glyphs (`□`).
 
-### B. Interactive Touch Engine & Server-Side Hit-Testing
+### B. High-Fidelity Widgets
+- **Calendar Timeline (`calendar_timeline`)**: Chronological event rail with concentric container, event nodes, and active "NOW • HH:MM" pill indicator.
+- **Weather Forecast (`weather_forecast`)**: Multi-day forecast matrix with MDI weather condition icons, high/low temperatures, and precipitation probability badges (`💧 40%`).
+
+### C. Zero-RAM 1-Bit BMP & Battery-Saving ETag 304 Caching
+- **TRMNL & ESP32 Direct Streaming**: Zero-RAM 1-bit BMP output (`/frame.bmp`) allowing microcontrollers to stream bytes straight into the display controller without in-memory image decoding.
+- **Conditional HTTP 304 Not Modified**: Full support for `ETag` and `If-None-Match`. When the screen state is unchanged, the server returns HTTP 304 with an empty body, eliminating battery-draining Wi-Fi transfers and preventing unnecessary e-ink flashing.
+- **TRMNL BYOS Webhook**: Built-in webhook at `/api/trmnl` parsing battery voltage, reporting device telemetry, and serving scheduled frame refreshes.
+
+### D. Interactive Touch Engine & Server-Side Hit-Testing
 Because the editor stores the exact pixel bounding boxes `(x, y, w, h)` of every card and button, client devices only need to capture touch coordinates `(X, Y)`:
 1. **Edge Tap Navigation ("Book Metaphor")**:
    - Left 15% of screen width $\to$ Navigate to previous page.
@@ -71,8 +82,10 @@ flowchart TD
 ## 4. Visual WYSIWYG Editor
 
 PaperHub features a visual drag-and-drop editor embedded directly in the Home Assistant sidebar:
-- **Device Profile Switcher**: Instant canvas switching between Onyx Boox, Kindle, Kobo, and custom dimensions.
+- **Device Profile Switcher**: Instant canvas switching between Onyx Boox, Kindle, Kobo, TRMNL, and custom dimensions.
+- **Interactive Touch Simulator**: One-click simulator mode (`Simulate Touch`) enabling immediate testing of tap actions, edge turns, and widget responses with animated tactile ripple feedback.
 - **Interactive Tap Inspector**: Bind elements to Home Assistant entities, service calls, or page transitions.
+- **Ready-Made Apple-Style Presets**: One-click insertion of Dynamic Grids, Weather Forecasts, and Calendar Timelines.
 - **Edge Turn Zone Overlays**: Visual guides showing the 15% left/right page-turn trigger boundaries.
 - **7,000+ MDI Icon Search**: Instant vector icon glyph picker.
 

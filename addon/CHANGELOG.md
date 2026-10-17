@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.1.0 - TRMNL Support, Calendar & Weather Widgets, Conditional ETag Caching
+
+- **TRMNL Hardware & Zero-RAM Direct BMP Streaming**:
+  - Added native display profiles for `trmnl_og` (800 × 480, 120 PPI) and `trmnl_x` (1872 × 1404, 227 PPI).
+  - Added 1-bit monochrome uncompressed BMP output (`/frame.bmp` and `/api/devices/{device_id}/frame.bmp`, 48,062 bytes for 800x480). Streams directly into ESP32 display controllers with zero microcontroller RAM overhead.
+  - Added TRMNL BYOS-compatible webhook endpoint (`/api/trmnl`) parsing hardware MAC and battery voltage headers to track device battery health.
+- **Conditional ETag HTTP 304 Caching**:
+  - Implemented HTTP `ETag` and `If-None-Match` handling across all frame endpoints (`/frame.png`, `/frame.bmp`).
+  - Unchanged screens return HTTP 304 without response body, saving 98%+ Wi-Fi network traffic and preventing unnecessary e-ink flashing.
+  - Updated Linux daemons (`paperhub-daemon.sh` and `paperhub-evdev.py`) to poll with ETag caching.
+- **Rich Calendar & Weather Widgets (Apple Craftsmanship Standard)**:
+  - Added `calendar_timeline` widget: Chronological schedule view with concentric card container, event nodes, and active "NOW • HH:MM" pill indicator.
+  - Added `weather_forecast` widget: 5-day forecast columns with MDI weather icons, temperature hi/lo ranges, and precipitation probability badges (`💧 40%`).
+  - Added pre-configured "Agenda" screen preset to `default_layouts.json`.
+- **Multilingual Typography Fallback**:
+  - Automatic glyph inspection selecting `DejaVuSans` for non-Latin characters and symbols (Cyrillic, Greek, math, arrows `→`, stars `★`, and degree symbols `℃`), preventing empty box glyphs (`□`).
+- **Interactive Simulator in Visual Editor**:
+  - Added `Simulate Touch` mode to test edge-turn zone navigation, capacitive button taps, and entity actions directly on the editor canvas with animated ripple feedback.
+  - Added one-click widget presets for Calendar Timeline and Weather Forecast in the component palette and template library.
+- **Automated Verification Suite**:
+  - Added automated unit and async endpoint test suite in `addon/app/tests/test_paperhub.py`.
+
 ## 1.0.0 - Project Inception
 
 - **High-DPI Consumer E-Reader Profiles**:

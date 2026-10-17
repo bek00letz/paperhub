@@ -8,6 +8,8 @@ SERVER_URL="${PAPERHUB_SERVER:-http://homeassistant.local:8099}"
 DEVICE_ID="${PAPERHUB_DEVICE:-kindle_pw}"
 INPUT_DEV="${PAPERHUB_INPUT:-/dev/input/event0}"
 FRAME_TMP="/tmp/paperhub_frame.png"
+ETAG_FILE="/tmp/paperhub.etag"
+HEADERS_FILE="/tmp/paperhub_headers.txt"
 POLL_INTERVAL=60
 
 # Identify framebuffer draw utility: fbink > eips > cat to fb0
@@ -30,10 +32,35 @@ draw_frame() {
     fi
 }
 
-fetch_initial_frame() {
-    log "Fetching initial frame from $SERVER_URL for device $DEVICE_ID..."
-    curl -s -m 10 "$SERVER_URL/api/devices/$DEVICE_ID/frame.png" -o "$FRAME_TMP"
-    draw_frame
+fetch_frame() {
+    ETAG_HDR=""
+    if [ -f "$ETAG_FILE" ]; then
+        PREV_ETAG=$(cat "$ETAG_FILE" 2>/dev/null | tr -d '\r\n"')
+        if [ -n "$PREV_ETAG" ]; then
+            ETAG_HDR="-H If-None-Match: \"$PREV_ETAG\""
+        fi
+    fi
+
+    HTTP_STATUS=$(curl -s -m 10 -D "$HEADERS_FILE" $ETAG_HDR "$SERVER_URL/api/devices/$DEVICE_ID/frame.png" -o "${FRAME_TMP}.new" -w "%{http_code}")
+    
+    if [ "$HTTP_STATUS" = "304" ]; then
+        # Content unchanged: skip disk write and e-ink refresh to preserve battery
+        rm -f "${FRAME_TMP}.new"
+        return 0
+    elif [ "$HTTP_STATUS" = "200" ] && [ -s "${FRAME_TMP}.new" ]; then
+        mv "${FRAME_TMP}.new" "$FRAME_TMP"
+        NEW_ETAG=$(grep -i '^etag:' "$HEADERS_FILE" 2>/dev/null | awk '{print $2}' | tr -d '\r\n"')
+        if [ -n "$NEW_ETAG" ]; then
+            echo "$NEW_ETAG" > "$ETAG_FILE"
+        fi
+        log "Frame updated (ETag=$NEW_ETAG); drawing to e-ink screen."
+        draw_frame
+        return 0
+    else
+        log "Frame fetch returned HTTP $HTTP_STATUS"
+        rm -f "${FRAME_TMP}.new"
+        return 1
+    fi
 }
 
 # Auto-detect screen resolution
@@ -48,17 +75,13 @@ if command -v fbink >/dev/null 2>&1; then
 fi
 
 log "Started daemon: Server=$SERVER_URL Device=$DEVICE_ID Res=${SCREEN_W}x${SCREEN_H}"
-fetch_initial_frame
+fetch_frame
 
-# Background periodic refresh loop
+# Background periodic refresh loop (checks conditional ETag every 60s)
 (
     while true; do
         sleep "$POLL_INTERVAL"
-        curl -s -m 8 "$SERVER_URL/api/devices/$DEVICE_ID/frame.png" -o "${FRAME_TMP}.new" 2>/dev/null
-        if [ -s "${FRAME_TMP}.new" ]; then
-            mv "${FRAME_TMP}.new" "$FRAME_TMP"
-            draw_frame
-        fi
+        fetch_frame
     done
 ) &
 TICKER_PID=$!

@@ -1132,6 +1132,8 @@ aside {
             <option value="boox_note_air">Onyx Boox Note Air 3 (1404 × 1872, 227 PPI)</option>
             <option value="kindle_scribe">Kindle Scribe 10.2" (1860 × 2480, 300 PPI)</option>
             <option value="remarkable_2">reMarkable 2 (1404 × 1872, 226 PPI)</option>
+            <option value="trmnl_og">TRMNL 7.5" (800 × 480, 120 PPI)</option>
+            <option value="trmnl_x">TRMNL X 10.3" (1872 × 1404, 227 PPI)</option>
             <option value="crowpanel_579">CrowPanel 5.79" (792 × 272)</option>
           </select>
         </label>
@@ -1153,7 +1155,10 @@ aside {
           <span id="panel-refresh-val" style="font-weight:700;min-width:34px;display:inline-block">5 min</span>
         </label>
       </div>
-      <div style="display:flex;gap:6px">
+      <div style="display:flex;gap:6px;align-items:center">
+        <button id="sim-btn" class="sm" title="Test touch taps and book navigation interactively" style="display:inline-flex;align-items:center;gap:4px">
+          <span>👆 Simulate Touch</span>
+        </button>
         <button id="zoomfit" class="sm active">Fit</button>
         <button id="zoom100" class="sm">100%</button>
       </div>
@@ -1264,6 +1269,8 @@ aside {
           <button data-add="curve"><span class="icon">📈</span><span>Graph</span></button>
           <button data-add="line"><span class="icon">➖</span><span>Divider</span></button>
           <button data-add="dynamic_grid"><span class="icon">🔲</span><span>Dynamic Grid</span></button>
+          <button data-add="calendar_timeline"><span class="icon">📅</span><span>Timeline</span></button>
+          <button data-add="weather_forecast"><span class="icon">🌤️</span><span>Weather</span></button>
         </div>
       </div>
     </div>
@@ -1487,6 +1494,8 @@ const DISPLAYS = {
   boox_note_air: { id: "boox_note_air", name: "Onyx Boox Note Air 3", w: 1404, h: 1872, ppi: 227, mm_w: 157.2, mm_h: 209.7, margin: 64 },
   kindle_scribe: { id: "kindle_scribe", name: "Kindle Scribe 10.2\"", w: 1860, h: 2480, ppi: 300, mm_w: 157.4, mm_h: 209.9, margin: 72 },
   remarkable_2: { id: "remarkable_2", name: "reMarkable 2 (10.3\")", w: 1404, h: 1872, ppi: 226, mm_w: 157.2, mm_h: 209.7, margin: 64 },
+  trmnl_og: { id: "trmnl_og", name: "TRMNL 7.5\" (800×480)", w: 800, h: 480, ppi: 120, mm_w: 163.2, mm_h: 97.9, margin: 32 },
+  trmnl_x: { id: "trmnl_x", name: "TRMNL X 10.3\" (1872×1404)", w: 1872, h: 1404, ppi: 227, mm_w: 209.7, mm_h: 157.2, margin: 64 },
   crowpanel_579: { id: "crowpanel_579", name: "CrowPanel 5.79\" (Legacy SPI)", w: 792, h: 272, ppi: 145, mm_w: 139.1, mm_h: 47.7, margin: 40 }
 };
 
@@ -2320,6 +2329,79 @@ function guidesResize(el, i) {
   if (gy !== null) { const g = document.createElement("div"); g.className = "guide h"; g.style.top = (gy / ch * 100) + "%"; canvas.appendChild(g); }
 }
 
+/* Interactive Touch Simulator Mode */
+let simMode = false;
+$("sim-btn").onclick = () => {
+  simMode = !simMode;
+  $("sim-btn").classList.toggle("active", simMode);
+  $("sim-btn").style.background = simMode ? "var(--accent)" : "";
+  $("sim-btn").style.color = simMode ? "#fff" : "";
+  canvas.style.cursor = simMode ? "pointer" : "";
+  canvas.querySelectorAll(".el").forEach(el => el.style.pointerEvents = simMode ? "none" : "");
+  msg(simMode ? "Simulation Mode: Click any element or edge zone to test touch." : "Editor Mode: Drag and configure elements.");
+};
+
+async function simulateTouchTap(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = curW() / rect.width;
+  const scaleY = curH() / rect.height;
+  const tx = Math.round((e.clientX - rect.left) * scaleX);
+  const ty = Math.round((e.clientY - rect.top) * scaleY);
+
+  const ripple = document.createElement("div");
+  ripple.style.position = "absolute";
+  ripple.style.left = (tx / curW() * 100) + "%";
+  ripple.style.top = (ty / curH() * 100) + "%";
+  ripple.style.width = "28px";
+  ripple.style.height = "28px";
+  ripple.style.borderRadius = "50%";
+  ripple.style.background = "rgba(2, 132, 199, 0.4)";
+  ripple.style.border = "2px solid #0284c7";
+  ripple.style.transform = "translate(-50%, -50%) scale(0.6)";
+  ripple.style.transition = "transform 0.28s ease, opacity 0.28s ease";
+  ripple.style.pointerEvents = "none";
+  ripple.style.zIndex = "999";
+  canvas.appendChild(ripple);
+  requestAnimationFrame(() => {
+    ripple.style.transform = "translate(-50%, -50%) scale(1.6)";
+    ripple.style.opacity = "0";
+  });
+  setTimeout(() => ripple.remove(), 300);
+
+  try {
+    const res = await api(`api/touch?device=editor_preview&x=${tx}&y=${ty}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: tx, y: ty })
+    });
+    const data = await res.json();
+    const hit = data.hit || {};
+    if (hit.handled) {
+      if (hit.type === "nav_prev" || hit.type === "nav_next") {
+        msg(`📖 Book Navigation: Switched to page '${data.page}'`);
+        if (data.page && spec.pages[data.page]) {
+          cur = data.page;
+          paint();
+        }
+      } else if (hit.action === "navigate_page" || hit.target_page) {
+        const tgt = hit.target_page || hit.action;
+        msg(`🎯 Navigation Action: Jumped to page '${tgt}'`);
+        if (tgt && spec.pages[tgt]) {
+          cur = tgt;
+          paint();
+        }
+      } else {
+        msg(`🎯 Touch Hit: ${hit.action || "action"} on ${hit.entity || hit.element_type || "element"}`);
+      }
+    } else {
+      msg(`👆 Tap at (${tx}, ${ty}) - no action bound`);
+    }
+    preview();
+  } catch (err) {
+    msg(`Simulated touch: ${err.message}`);
+  }
+}
+
 /* Pointer drag & resize */
 let drag = null;
 function endDrag() {
@@ -2331,6 +2413,10 @@ function endDrag() {
 }
 canvas.addEventListener("pointerdown", e => {
   if (e.button !== 0) return;
+  if (simMode) {
+    simulateTouchTap(e);
+    return;
+  }
   const box = e.target.closest(".el");
   if (!box) { sel = -1; paint(); return; }
   sel = +box.dataset.i;
@@ -2428,6 +2514,22 @@ document.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
       { entity: "switch.zone_3", name: "Zone 3", icon: "mdi:radiator" },
       { entity: "switch.zone_4", name: "Zone 4", icon: "mdi:radiator" }
     ];
+  }
+  if (t === "calendar_timeline") {
+    base.w = maxW;
+    base.h = Math.min(360, Math.round(curH() * 0.35));
+    base.entity = "calendar.personal";
+    base.title = "Today's Schedule";
+    base.max_events = 4;
+    base.radius = 20;
+  }
+  if (t === "weather_forecast") {
+    base.w = maxW;
+    base.h = Math.min(280, Math.round(curH() * 0.28));
+    base.entity = "weather.home";
+    base.title = "5-Day Forecast";
+    base.days = 5;
+    base.radius = 20;
   }
   els().push(base); sel = els().length - 1; paint(); preview();
 });
@@ -2807,6 +2909,18 @@ function props() {
     if (!el.items.length) {
       h += `<div class="chip">No spots configured yet. Click <b>＋ Add Spot</b> above.</div>`;
     }
+  } else if (el.type === "calendar_timeline") {
+    h += f("title", "title", "text", "Today's Schedule") +
+      f("entity", "calendar entity", "text", "calendar.personal", "entities-dl") +
+      f("max_events", "max events", "number", "4") +
+      f("radius", "corner radius", "number", "20") +
+      `<div class="chip">Displays chronological events with active 'NOW' badge and timeline node indicators.</div>`;
+  } else if (el.type === "weather_forecast") {
+    h += f("title", "title", "text", "5-Day Forecast") +
+      f("entity", "weather entity", "text", "weather.home", "entities-dl") +
+      f("days", "forecast days", "number", "5") +
+      f("radius", "corner radius", "number", "20") +
+      `<div class="chip">Displays multi-day forecast matrix with MDI weather icons and precipitation probabilities.</div>`;
   }
   h += "</div>";
 
@@ -2847,6 +2961,9 @@ function props() {
         h += `<div class="chip bad"><span class="warn">Text overflows box</span></div>`;
       }
     }
+    h += "</div>";
+  }
+
   /* Touch & Remote Interaction */
   const touchCfg = el.touch || {};
   const curAct = touchCfg.action || el.action || (el.entity ? "toggle" : "none");
@@ -3675,10 +3792,48 @@ const PRESET_ICONS = {
   presence_door: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V6a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14"/><path d="M2 20h20"/><circle cx="14" cy="12" r="1"/></svg>`,
   bin_day: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
   clock: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
-  dynamic_entities: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>`
+  dynamic_entities: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>`,
+  calendar_timeline: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg>`,
+  weather_forecast: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>`
 };
 
 const PRESETS = [
+  {
+    id: "calendar_timeline",
+    title: "Calendar Agenda & Timeline",
+    desc: "Apple-standard chronological agenda with start/end badges, ongoing event highlight, and location details.",
+    makeElements: (ent) => [
+      {
+        type: "calendar_timeline",
+        x: curMargin(),
+        y: 60,
+        w: curW() - curMargin() * 2,
+        h: Math.min(420, Math.round(curH() * 0.36)),
+        title: "Today's Schedule",
+        entity: ent || "calendar.personal",
+        max_events: 4,
+        radius: 20
+      }
+    ]
+  },
+  {
+    id: "weather_forecast",
+    title: "Weather Forecast Matrix",
+    desc: "Multi-day horizontal forecast matrix with high-resolution MDI condition icons and precipitation badges.",
+    makeElements: (ent) => [
+      {
+        type: "weather_forecast",
+        x: curMargin(),
+        y: 60,
+        w: curW() - curMargin() * 2,
+        h: Math.min(300, Math.round(curH() * 0.28)),
+        title: "5-Day Weather Outlook",
+        entity: ent || "weather.home",
+        days: 5,
+        radius: 20
+      }
+    ]
+  },
   {
     id: "dynamic_entities",
     title: "Dynamic Entities",

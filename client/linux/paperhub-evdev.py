@@ -34,6 +34,9 @@ ABS_MT_POSITION_X = 0x35
 ABS_MT_POSITION_Y = 0x36
 
 
+_last_etag = ""
+
+
 def draw_frame(path=FRAME_TMP):
     """Draw frame to e-ink screen using fbink or eips."""
     if subprocess.call(["which", "fbink"], stdout=subprocess.DEVNULL) == 0:
@@ -43,28 +46,48 @@ def draw_frame(path=FRAME_TMP):
 
 
 def fetch_frame():
+    global _last_etag
     url = f"{SERVER_URL}/api/devices/{DEVICE_ID}/frame.png"
+    headers = {}
+    if _last_etag:
+        headers["If-None-Match"] = f'"{_last_etag}"'
     try:
-        req = urllib.request.Request(url)
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=10) as resp:
-            with open(FRAME_TMP, "wb") as f:
-                f.write(resp.read())
-        draw_frame()
+            etag = resp.headers.get("ETag", "").strip('" ')
+            if etag:
+                _last_etag = etag
+            data = resp.read()
+            if data:
+                with open(FRAME_TMP, "wb") as f:
+                    f.write(data)
+                draw_frame()
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            # Content unchanged: preserve battery and skip draw
+            return
+        print(f"[PaperHub] HTTP error: {e}", file=sys.stderr)
     except Exception as e:
         print(f"[PaperHub] Fetch failed: {e}", file=sys.stderr)
 
 
 def send_touch(x, y, gesture=""):
+    global _last_etag
     url = f"{SERVER_URL}/api/devices/{DEVICE_ID}/touch?format=png"
     data = json.dumps({"x": x, "y": y, "gesture": gesture}).encode("utf-8")
     try:
         req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=5) as resp:
+            etag = resp.headers.get("ETag", "").strip('" ')
+            if etag:
+                _last_etag = etag
             content_type = resp.headers.get("Content-Type", "")
             if "image/png" in content_type:
-                with open(FRAME_TMP, "wb") as f:
-                    f.write(resp.read())
-                draw_frame()
+                data_body = resp.read()
+                if data_body:
+                    with open(FRAME_TMP, "wb") as f:
+                        f.write(data_body)
+                    draw_frame()
             else:
                 fetch_frame()
     except Exception as e:

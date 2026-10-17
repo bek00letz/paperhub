@@ -6,6 +6,8 @@ millisecond-fast server-side 2D hit-testing for touch interactions.
 """
 import json
 import math
+import re
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -145,7 +147,7 @@ def _draw_text(img, draw, el, val, metrics=None, *, distance_m=3.0, display=None
     size = el.get("size")
     if not size:
         size = T.fit_size(val, w, h, start=min(h, 240), floor=12, bold=bold, family=family)
-    f = T.font(size, bold=bold, family=family)
+    f = T.best_font_for_text(val, size, bold=bold, family=family)
 
     tx = _anchor_x(align, x, w)
     anchor_mode = {"left": "lt", "center": "mt", "right": "rt"}.get(align, "lt")
@@ -379,6 +381,277 @@ def _draw_button(img, draw, el, val="", display=None):
         draw.text((x + w // 2, y + h // 2), label, font=f, fill=color, anchor="mm")
 
 
+
+CONDITION_ICONS = {
+    "clear-night": "mdi:weather-night",
+    "cloudy": "mdi:weather-cloudy",
+    "fog": "mdi:weather-fog",
+    "hail": "mdi:weather-hail",
+    "lightning": "mdi:weather-lightning",
+    "lightning-rainy": "mdi:weather-lightning-rainy",
+    "partlycloudy": "mdi:weather-partly-cloudy",
+    "pouring": "mdi:weather-pouring",
+    "rainy": "mdi:weather-rainy",
+    "snowy": "mdi:weather-snowy",
+    "snowy-rainy": "mdi:weather-snowy-rainy",
+    "sunny": "mdi:weather-sunny",
+    "windy": "mdi:weather-windy",
+    "windy-variant": "mdi:weather-windy-variant",
+    "exceptional": "mdi:alert-circle-outline",
+}
+
+
+def _format_time_str(val):
+    if not val:
+        return ""
+    s = str(val).strip()
+    if re.match(r"^\d{1,2}:\d{2}", s):
+        return s[:5]
+    m = re.search(r"(\d{1,2}):(\d{2})", s)
+    if m:
+        return f"{int(m.group(1)):02d}:{m.group(2)}"
+    return s
+
+
+def _format_day_label(val, idx):
+    if not val:
+        return "TODAY" if idx == 0 else f"+{idx}D"
+    s = str(val).strip()
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+        if dt.date() == now.date():
+            return "TODAY"
+        return dt.strftime("%a").upper()
+    except Exception:
+        pass
+    if idx == 0:
+        return "TODAY"
+    return f"+{idx}D"
+
+
+def _draw_calendar_timeline(img, draw, el, val, display=None):
+    """Draw an Apple-standard agenda timeline displaying upcoming events."""
+    x, y, w, h = _clamp_box(el, default_w=600, default_h=360, display=display)
+    radius = int(el.get("radius", 20))
+    title = str(el.get("title") or "Today's Schedule")
+    max_events = int(el.get("max_events", 4))
+
+    events = []
+    if isinstance(val, str) and val.strip().startswith(("{", "[")):
+        try:
+            val = json.loads(val)
+        except Exception:
+            pass
+
+    if isinstance(val, dict):
+        if "events" in val and isinstance(val["events"], list):
+            events = val["events"]
+        else:
+            ev_title = val.get("message") or val.get("summary") or val.get("friendly_name")
+            if ev_title:
+                events.append({
+                    "summary": str(ev_title),
+                    "start": str(val.get("start_time") or val.get("start") or ""),
+                    "end": str(val.get("end_time") or val.get("end") or ""),
+                    "location": str(val.get("location") or ""),
+                    "ongoing": val.get("state") == "on" or bool(val.get("ongoing")),
+                })
+    elif isinstance(val, list):
+        events = val
+
+    # Concentric Card Outer Container with ambient depth
+    T.draw_card(draw, [(x, y), (x + w, y + h)], radius=radius, fill=T.WHITE, outline=T.GRAY_BORDER, shadow=True)
+
+    # Header Bar
+    header_h = min(56, max(36, int(h * 0.16)))
+    f_hdr = T.best_font_for_text(title, max(14, min(22, int(header_h * 0.45))), bold=True)
+    _draw_icon_glyph(draw, "mdi:calendar-blank", x + 24 + 10, y + header_h // 2, 22, color=T.BLACK)
+    draw.text((x + 48, y + header_h // 2), title, font=f_hdr, fill=T.BLACK, anchor="lm")
+
+    # Hairline divider
+    draw.line([(x + 16, y + header_h), (x + w - 16, y + header_h)], fill=T.GRAY_BORDER, width=1)
+
+    # Empty State
+    if not events:
+        empty_isz = max(28, min(48, int(h * 0.2)))
+        _draw_icon_glyph(draw, "mdi:calendar-check", x + w // 2, y + header_h + (h - header_h) // 2 - 12, empty_isz, color=T.GRAY_MUTED)
+        f_empty = T.font(max(13, min(18, int(empty_isz * 0.4))), bold=False)
+        draw.text((x + w // 2, y + header_h + (h - header_h) // 2 + empty_isz // 2 + 6), "No upcoming events today", font=f_empty, fill=T.GRAY_MUTED, anchor="mm")
+        return
+
+    visible = events[:max_events]
+    n = len(visible)
+    avail_h = h - header_h - 20
+    row_h = avail_h / max(1, n)
+    rail_x = x + min(170, max(120, int(w * 0.22)))
+
+    # Continuous vertical timeline rail
+    if n > 1:
+        rail_top = y + header_h + int(row_h * 0.5)
+        rail_bot = y + header_h + int((n - 0.5) * row_h)
+        draw.line([(rail_x, rail_top), (rail_x, rail_bot)], fill=T.GRAY_BORDER, width=2)
+
+    for i, ev in enumerate(visible):
+        center_y = int(y + header_h + 10 + (i + 0.5) * row_h)
+        summary = str(ev.get("summary") or ev.get("title") or "Event")
+        start = str(ev.get("start") or ev.get("start_time") or "")
+        end = str(ev.get("end") or ev.get("end_time") or "")
+        loc = str(ev.get("location") or "")
+        is_ongoing = bool(ev.get("ongoing") or ev.get("state") == "on")
+
+        start_fmt = _format_time_str(start)
+        end_fmt = _format_time_str(end)
+
+        time_box_w = rail_x - x - 28
+        if is_ongoing:
+            badge_h = min(28, int(row_h * 0.5))
+            badge_y0 = center_y - badge_h // 2
+            T.draw_concentric_badge(
+                draw,
+                parent_radius=10,
+                padding=2,
+                box=[x + 16, badge_y0, x + 16 + time_box_w, badge_y0 + badge_h],
+                fill=T.BLACK,
+                text=f"NOW • {start_fmt}" if start_fmt else "NOW",
+                font=T.font(max(10, min(13, int(badge_h * 0.48))), bold=True),
+                text_color=T.WHITE,
+            )
+        else:
+            f_time_start = T.font(max(12, min(17, int(row_h * 0.3))), bold=True)
+            f_time_end = T.font(max(10, min(13, int(row_h * 0.24))), bold=False)
+            if end_fmt:
+                draw.text((rail_x - 14, center_y - 8), start_fmt, font=f_time_start, fill=T.BLACK, anchor="rm")
+                draw.text((rail_x - 14, center_y + 10), end_fmt, font=f_time_end, fill=T.GRAY_MUTED, anchor="rm")
+            else:
+                draw.text((rail_x - 14, center_y), start_fmt or "--:--", font=f_time_start, fill=T.BLACK, anchor="rm")
+
+        # Timeline Node
+        if is_ongoing:
+            draw.ellipse([(rail_x - 7, center_y - 7), (rail_x + 7, center_y + 7)], fill=T.WHITE, outline=T.BLACK, width=2)
+            draw.ellipse([(rail_x - 4, center_y - 4), (rail_x + 4, center_y + 4)], fill=T.BLACK)
+        else:
+            draw.ellipse([(rail_x - 5, center_y - 5), (rail_x + 5, center_y + 5)], fill=T.WHITE, outline=T.GRAY_MID, width=2)
+
+        # Event Details
+        detail_x = rail_x + 16
+        detail_max_w = max(40, x + w - detail_x - 16)
+        name_sz = max(13, min(20, int(row_h * 0.32)))
+        f_name = T.best_font_for_text(summary, name_sz, bold=True)
+        fitted_summary = _fit_text(summary, detail_max_w, f_name)
+
+        if loc:
+            draw.text((detail_x, center_y - int(name_sz * 0.55)), fitted_summary, font=f_name, fill=T.BLACK, anchor="lm")
+            f_loc = T.font(max(10, int(name_sz * 0.72)), bold=False)
+            fitted_loc = _fit_text(f"📍 {loc}", detail_max_w, f_loc)
+            draw.text((detail_x, center_y + int(name_sz * 0.65)), fitted_loc, font=f_loc, fill=T.GRAY_MUTED, anchor="lm")
+        else:
+            draw.text((detail_x, center_y), fitted_summary, font=f_name, fill=T.BLACK, anchor="lm")
+
+
+def _draw_weather_forecast(img, draw, el, val, display=None):
+    """Draw an Apple-standard multi-day weather forecast matrix."""
+    x, y, w, h = _clamp_box(el, default_w=600, default_h=260, display=display)
+    radius = int(el.get("radius", 20))
+    title = str(el.get("title") or "5-Day Forecast")
+    max_days = int(el.get("days", 5))
+
+    forecast = []
+    current_temp = None
+    current_cond = ""
+    if isinstance(val, str) and val.strip().startswith(("{", "[")):
+        try:
+            val = json.loads(val)
+        except Exception:
+            pass
+
+    if isinstance(val, dict):
+        current_temp = val.get("temperature")
+        current_cond = str(val.get("condition") or "")
+        forecast = val.get("forecast") or []
+    elif isinstance(val, list):
+        forecast = val
+
+    # Concentric Card Outer Container with ambient depth
+    T.draw_card(draw, [(x, y), (x + w, y + h)], radius=radius, fill=T.WHITE, outline=T.GRAY_BORDER, shadow=True)
+
+    # Header Bar
+    header_h = min(52, max(34, int(h * 0.18)))
+    hdr_icon = CONDITION_ICONS.get(current_cond.lower().replace(" ", "-"), "mdi:weather-partly-cloudy")
+    _draw_icon_glyph(draw, hdr_icon, x + 24 + 10, y + header_h // 2, 22, color=T.BLACK)
+    f_hdr = T.font(max(14, min(20, int(header_h * 0.45))), bold=True)
+    draw.text((x + 48, y + header_h // 2), title, font=f_hdr, fill=T.BLACK, anchor="lm")
+
+    if current_temp is not None:
+        cond_label = current_cond.replace("-", " ").title() if current_cond else ""
+        cur_str = f"{round(float(current_temp))}° • {cond_label}" if cond_label else f"{round(float(current_temp))}°"
+        f_cur = T.font(max(13, min(18, int(header_h * 0.42))), bold=True)
+        draw.text((x + w - 20, y + header_h // 2), cur_str, font=f_cur, fill=T.BLACK, anchor="rm")
+
+    draw.line([(x + 16, y + header_h), (x + w - 16, y + header_h)], fill=T.GRAY_BORDER, width=1)
+
+    slots = forecast[:max_days]
+    n = len(slots)
+    if n == 0:
+        f_empty = T.font(14, bold=False)
+        draw.text((x + w // 2, y + header_h + (h - header_h) // 2), "No forecast data available", font=f_empty, fill=T.GRAY_MUTED, anchor="mm")
+        return
+
+    col_w = (w - 24) / n
+    body_h = h - header_h - 12
+
+    for i, day in enumerate(slots):
+        cx0 = int(x + 12 + i * col_w)
+        mid_x = int(cx0 + col_w * 0.5)
+
+        if i > 0:
+            draw.line([(cx0, y + header_h + 10), (cx0, y + h - 16)], fill=T.GRAY_BORDER, width=1)
+
+        dt_str = str(day.get("datetime") or "")
+        day_label = _format_day_label(dt_str, i)
+        f_day = T.font(max(11, min(16, int(body_h * 0.09))), bold=True)
+        draw.text((mid_x, y + header_h + 14), day_label, font=f_day, fill=T.GRAY_DARK if i > 0 else T.BLACK, anchor="mt")
+
+        cond = str(day.get("condition") or "").lower().replace(" ", "-")
+        ic_name = CONDITION_ICONS.get(cond, "mdi:weather-cloudy")
+        isz = max(28, min(56, int(col_w * 0.36), int(body_h * 0.28)))
+        icon_y = y + header_h + int(body_h * 0.36)
+        _draw_icon_glyph(draw, ic_name, mid_x, icon_y, isz, color=T.BLACK)
+
+        hi = day.get("temperature")
+        lo = day.get("templow")
+        hi_sz = max(13, min(24, int(body_h * 0.12)))
+        f_hi = T.font(hi_sz, bold=True)
+        f_lo = T.font(max(11, int(hi_sz * 0.8)), bold=False)
+        temp_y = icon_y + isz // 2 + 12
+
+        if hi is not None and lo is not None:
+            hi_str = f"{round(float(hi))}°"
+            lo_str = f"{round(float(lo))}°"
+            if col_w >= 90:
+                draw.text((mid_x - 4, temp_y), hi_str, font=f_hi, fill=T.BLACK, anchor="rm")
+                draw.text((mid_x + 4, temp_y), lo_str, font=f_lo, fill=T.GRAY_MUTED, anchor="lm")
+            else:
+                draw.text((mid_x, temp_y - 6), hi_str, font=f_hi, fill=T.BLACK, anchor="mm")
+                draw.text((mid_x, temp_y + 12), lo_str, font=f_lo, fill=T.GRAY_MUTED, anchor="mm")
+        elif hi is not None:
+            draw.text((mid_x, temp_y), f"{round(float(hi))}°", font=f_hi, fill=T.BLACK, anchor="mm")
+
+        precip = day.get("precipitation_probability")
+        if precip is None:
+            precip = day.get("precipitation")
+        if precip is not None:
+            try:
+                precip_val = int(round(float(precip)))
+            except (ValueError, TypeError):
+                precip_val = 0
+            if precip_val > 0:
+                p_sz = max(10, min(14, int(body_h * 0.08)))
+                f_p = T.font(p_sz, bold=False)
+                precip_y = y + h - 14
+                draw.text((mid_x, precip_y), f"💧{precip_val}%", font=f_p, fill=T.GRAY_MID, anchor="mb")
+
+
 DRAWERS = {
     "text": _draw_text,
     "number": _draw_text,
@@ -388,6 +661,8 @@ DRAWERS = {
     "dynamic_grid": _draw_dynamic_grid,
     "button": _draw_button,
     "card": _draw_button,
+    "calendar_timeline": _draw_calendar_timeline,
+    "weather_forecast": _draw_weather_forecast,
 }
 
 
@@ -460,7 +735,7 @@ def render_page(
                 if metrics is not None and got:
                     entry = {"i": i, **got[0]}
                     metrics.append(entry)
-            elif el["type"] == "dynamic_grid":
+            elif el["type"] in ("dynamic_grid", "calendar_timeline", "weather_forecast"):
                 drawer(img, d, el, vals.get(i), display=display)
             else:
                 drawer(img, d, el, element_text(el, vals, i), display=display)
@@ -602,4 +877,28 @@ def collect_templates(page):
                     "{% if not loop.last %},{% endif %}{% endfor %}]"
                 )
                 out[i] = tpl
+        elif el.get("type") == "calendar_timeline":
+            ent = (el.get("entity") or "calendar.personal").strip()
+            raw_val = el.get("value")
+            if raw_val and "{{" in str(raw_val):
+                out[i] = str(raw_val)
+            elif ent:
+                out[i] = (
+                    "{{ {'state': states('" + binding._quote(ent) + "'), "
+                    "'message': state_attr('" + binding._quote(ent) + "', 'message'), "
+                    "'start_time': state_attr('" + binding._quote(ent) + "', 'start_time'), "
+                    "'end_time': state_attr('" + binding._quote(ent) + "', 'end_time'), "
+                    "'location': state_attr('" + binding._quote(ent) + "', 'location')} | to_json }}"
+                )
+        elif el.get("type") == "weather_forecast":
+            ent = (el.get("entity") or "weather.home").strip()
+            raw_val = el.get("value")
+            if raw_val and "{{" in str(raw_val):
+                out[i] = str(raw_val)
+            elif ent:
+                out[i] = (
+                    "{{ {'temperature': state_attr('" + binding._quote(ent) + "', 'temperature'), "
+                    "'condition': states('" + binding._quote(ent) + "'), "
+                    "'forecast': (state_attr('" + binding._quote(ent) + "', 'forecast') or [])[:7]} | to_json }}"
+                )
     return out

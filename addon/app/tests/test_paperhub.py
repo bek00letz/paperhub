@@ -1,0 +1,254 @@
+"""PaperHub automated test suite.
+
+Tests:
+1. TRMNL profile lookup, BMP generation, and battery voltage parsing.
+2. Calendar timeline and weather forecast widget rasterization with Apple aesthetics.
+3. Multilingual font fallback (DejaVuSans for Cyrillic and symbols).
+4. Conditional ETag HTTP 304 caching and frame generation.
+5. Touch engine hit-testing (edge zones and center elements).
+6. Server endpoints: frame_png, frame_bmp, and api_trmnl webhook.
+"""
+
+import io
+import os
+import sys
+import time
+import json
+import asyncio
+import unittest
+
+# Ensure addon/app is in Python path
+APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
+
+from PIL import Image
+from render import theme as T
+from render import layout as L
+import server
+from aiohttp.test_utils import make_mocked_request
+
+
+class TestTRMNLSupport(unittest.TestCase):
+    def test_trmnl_profiles(self):
+        """Verify TRMNL display profiles exist and match hardware specs."""
+        self.assertIn("trmnl_og", T.DISPLAYS)
+        og = T.DISPLAYS["trmnl_og"]
+        self.assertEqual(og["w"], 800)
+        self.assertEqual(og["h"], 480)
+        self.assertEqual(og["ppi"], 120)
+
+        self.assertIn("trmnl_x", T.DISPLAYS)
+        tx = T.DISPLAYS["trmnl_x"]
+        self.assertEqual(tx["w"], 1872)
+        self.assertEqual(tx["h"], 1404)
+        self.assertEqual(tx["ppi"], 227)
+
+        # Alias resolution via get_display
+        self.assertEqual(T.get_display("trmnl")["w"], 800)
+        self.assertEqual(T.get_display("trmnl_og")["w"], 800)
+        self.assertEqual(T.get_display("trmnl_x")["w"], 1872)
+
+    def test_to_1bit_bmp(self):
+        """Verify to_1bit_bmp produces a valid 1-bit BMP for zero-RAM ESP32 streaming."""
+        img = Image.new("L", (800, 480), 255)
+        bmp_bytes = T.to_1bit_bmp(img)
+        self.assertTrue(bmp_bytes.startswith(b"BM"), "Missing BMP header signature 'BM'")
+        
+        # In a 1-bit BMP (800x480):
+        # 800 pixels / 8 bits = 100 bytes per row (4-byte aligned).
+        # 100 * 480 = 48,000 pixel data bytes + 62 bytes (headers + 2-color palette) = 48,062 bytes.
+        self.assertEqual(len(bmp_bytes), 48062)
+
+        # Verify PIL can reopen it as a valid 1-bit BMP
+        bmp_io = io.BytesIO(bmp_bytes)
+        reopened = Image.open(bmp_io)
+        self.assertEqual(reopened.size, (800, 480))
+        self.assertEqual(reopened.format, "BMP")
+
+
+class TestMultilingualFontFallback(unittest.TestCase):
+    def test_fallback_selection(self):
+        """Verify best_font_for_text selects DejaVuSans for non-ASCII/Cyrillic/symbols."""
+        # Standard ASCII can use Lato
+        font_ascii = T.best_font_for_text("Living Room Light", size=24, bold=True, family="lato")
+        self.assertTrue("Lato" in font_ascii.getname()[0] or "Lato" in str(font_ascii))
+
+        # Cyrillic text must fallback to DejaVuSans
+        font_cyr = T.best_font_for_text("Гостиная Свет", size=24, bold=True, family="lato")
+        self.assertTrue("DejaVu" in font_cyr.getname()[0] or "DejaVu" in str(font_cyr))
+
+        # Special symbol text (arrows, degrees, stars)
+        font_sym = T.best_font_for_text("Temp: 21.5°C ★ 12:00 → 13:00", size=20, bold=False, family="lato")
+        self.assertTrue("DejaVu" in font_sym.getname()[0] or "DejaVu" in str(font_sym))
+
+
+class TestWidgetsRasterization(unittest.TestCase):
+    def test_calendar_and_weather_rendering(self):
+        """Verify calendar_timeline and weather_forecast render with Apple aesthetics in < 25ms."""
+        cal_el = {
+            "type": "calendar_timeline",
+            "x": 40,
+            "y": 40,
+            "w": 992,
+            "h": 460,
+            "title": "Today's Schedule",
+            "radius": 24,
+            "max_events": 4,
+        }
+        weather_el = {
+            "type": "weather_forecast",
+            "x": 40,
+            "y": 520,
+            "w": 992,
+            "h": 320,
+            "title": "5-Day Forecast",
+            "radius": 24,
+            "days": 5,
+        }
+        page = {
+            "elements": [cal_el, weather_el]
+        }
+        vals = {
+            0: {
+                "events": [
+                    {
+                        "summary": "Design Sync (Carta 16-Gray)",
+                        "start": "09:30",
+                        "end": "10:30",
+                        "location": "Boardroom",
+                        "ongoing": True,
+                    },
+                    {
+                        "summary": "Home Assistant Sprint Review",
+                        "start": "13:00",
+                        "end": "14:00",
+                        "location": "Online",
+                        "ongoing": False,
+                    },
+                ]
+            },
+            1: {
+                "temperature": 21.8,
+                "condition": "partlycloudy",
+                "forecast": [
+                    {"datetime": "2026-10-17T12:00:00+00:00", "condition": "partlycloudy", "temperature": 22, "templow": 14, "precipitation_probability": 10},
+                    {"datetime": "2026-10-18T12:00:00+00:00", "condition": "sunny", "temperature": 24, "templow": 15, "precipitation_probability": 0},
+                    {"datetime": "2026-10-19T12:00:00+00:00", "condition": "rainy", "temperature": 18, "templow": 11, "precipitation_probability": 75},
+                    {"datetime": "2026-10-20T12:00:00+00:00", "condition": "cloudy", "temperature": 19, "templow": 12, "precipitation_probability": 20},
+                    {"datetime": "2026-10-21T12:00:00+00:00", "condition": "lightning", "temperature": 16, "templow": 10, "precipitation_probability": 80},
+                ],
+            },
+        }
+
+        t0 = time.perf_counter()
+        img = L.render_page(page, vals, display="boox_go_6", clock="10:45 AM", battery_pct=88)
+        render_ms = (time.perf_counter() - t0) * 1000
+
+        self.assertEqual(img.size, (1072, 1448))
+        self.assertEqual(img.mode, "L")
+        self.assertLess(render_ms, 25.0, f"Render took too long: {render_ms:.2f}ms (target < 25ms)")
+
+
+class TestETagAndTouchEngine(unittest.TestCase):
+    def test_hit_test_edge_navigation(self):
+        """Verify left/right 15% edge zones trigger page turns and center hits element."""
+        # Boox Go 6 portrait: 1072 x 1448
+        # Left 15% is <= 160.8, Right 15% is >= 911.2
+        page = {
+            "elements": [
+                {
+                    "type": "icon",
+                    "x": 400,
+                    "y": 400,
+                    "w": 200,
+                    "h": 200,
+                    "touch": {"action": "toggle", "entity": "light.living_room"}
+                }
+            ]
+        }
+        
+        # Left edge tap -> nav_prev
+        res_left = L.hit_test(page, 50, 500, display="boox_go_6", orientation=0, edge_nav_ratio=0.15)
+        self.assertTrue(res_left.get("handled"))
+        self.assertEqual(res_left.get("type"), "nav_prev")
+        self.assertEqual(res_left.get("edge"), "left")
+
+        # Right edge tap -> nav_next
+        res_right = L.hit_test(page, 1000, 500, display="boox_go_6", orientation=0, edge_nav_ratio=0.15)
+        self.assertTrue(res_right.get("handled"))
+        self.assertEqual(res_right.get("type"), "nav_next")
+        self.assertEqual(res_right.get("edge"), "right")
+
+        # Center tap on element -> element_action
+        res_center = L.hit_test(page, 450, 450, display="boox_go_6", orientation=0, edge_nav_ratio=0.15)
+        self.assertTrue(res_center.get("handled"))
+        self.assertEqual(res_center.get("type"), "element_action")
+        self.assertEqual(res_center.get("action"), "toggle")
+        self.assertEqual(res_center.get("entity"), "light.living_room")
+
+        # Center tap on empty space -> miss
+        res_miss = L.hit_test(page, 300, 300, display="boox_go_6", orientation=0, edge_nav_ratio=0.15)
+        self.assertFalse(res_miss.get("handled"))
+        self.assertEqual(res_miss.get("type"), "miss")
+
+
+class TestServerEndpoints(unittest.TestCase):
+    def test_frame_png_and_etag(self):
+        """Verify frame_png returns 200 with ETag, and 304 on matching If-None-Match."""
+        async def _run():
+            # First fetch: 200 OK with ETag
+            req = make_mocked_request("GET", "/frame.png")
+            resp = await server.frame_png(req)
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.content_type, "image/png")
+            etag = resp.headers.get("ETag")
+            self.assertIsNotNone(etag)
+
+            # Conditional fetch: 304 Not Modified
+            req304 = make_mocked_request("GET", "/frame.png", headers={"If-None-Match": etag})
+            resp304 = await server.frame_png(req304)
+            self.assertEqual(resp304.status, 304)
+
+        asyncio.run(_run())
+
+    def test_frame_bmp_and_etag(self):
+        """Verify frame_bmp returns 200 with image/bmp and 304 on matching If-None-Match."""
+        async def _run():
+            req = make_mocked_request("GET", "/frame.bmp")
+            resp = await server.frame_bmp(req)
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.content_type, "image/bmp")
+            self.assertTrue(resp.body.startswith(b"BM"))
+            etag = resp.headers.get("ETag")
+            self.assertIsNotNone(etag)
+
+            req304 = make_mocked_request("GET", "/frame.bmp", headers={"If-None-Match": etag})
+            resp304 = await server.frame_bmp(req304)
+            self.assertEqual(resp304.status, 304)
+
+        asyncio.run(_run())
+
+    def test_trmnl_webhook(self):
+        """Verify TRMNL webhook endpoint parses headers and returns JSON payload."""
+        async def _run():
+            req = make_mocked_request(
+                "GET",
+                "/api/trmnl",
+                headers={
+                    "ID": "trmnl-kitchen-01",
+                    "Battery-Voltage": "4.15",
+                },
+            )
+            resp = await server.api_trmnl(req)
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.text)
+            self.assertIn("image_url", data)
+            self.assertIn("refresh_rate", data)
+            self.assertEqual(data.get("status"), 0)
+
+        asyncio.run(_run())
+
+
+if __name__ == "__main__":
+    unittest.main()
