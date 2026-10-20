@@ -1,5 +1,9 @@
 # Notes for Agents: PaperHub
 
+> **Status: stalled (2026-10-20).** Don't start new work here unless the user asks for it. Ideas for e-ink
+> dashboards on many screens go to e-paper panel (`bek00letz/epaper-panel`), which supports TRMNL. Why it stalled,
+> and what a new approach would need to solve: [docs/FINDINGS-2026-10-20.md](docs/FINDINGS-2026-10-20.md).
+
 Read [ARCHITECTURE.md](ARCHITECTURE.md) and [QUICKSTART.md](QUICKSTART.md) before making structural changes.
 
 ---

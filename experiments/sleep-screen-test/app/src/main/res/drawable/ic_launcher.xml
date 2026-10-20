@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A crescent moon on a white page: the app is about what the screen shows while asleep. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#000000"
+        android:strokeWidth="4"
+        android:pathData="M30,10h48a20,20 0 0 1 20,20v48a20,20 0 0 1 -20,20h-48a20,20 0 0 1 -20,-20v-48a20,20 0 0 1 20,-20z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M54,26a28,28 0 1 0 0.01,0z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M66,22a24,24 0 1 0 0.01,0z" />
+</vector>

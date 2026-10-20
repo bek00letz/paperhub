@@ -1,5 +1,13 @@
 # PaperHub
 
+> [!IMPORTANT]
+> **Paperhub has stalled (October 2026).** I'm not planning to give it more time unless a new approach turns up.
+> Its central idea, a touch dashboard on an e-reader that stays current for weeks on battery, didn't survive testing on a real device: the Android e-reader it was tested on won't let any app update its screen while it sleeps. [What we found](docs/FINDINGS-2026-10-20.md).
+>
+> For e-ink dashboards in Home Assistant, including [TRMNL](https://usetrmnl.com) screens, use [e-paper panel](https://github.com/bek00letz/epaper-panel), which is maintained.
+>
+> The battery-life and speed figures further down were never measured. Read them as the goals the project had, not as results.
+
 > **Ambient E-Ink Touch Controller for Home Assistant**  
 > *Transform consumer e-readers into zero-latency, multi-week battery smart home touch remotes.*
 
