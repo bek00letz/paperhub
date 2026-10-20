@@ -278,7 +278,9 @@ async def resolve_templates(session, templates):
 
 
 _aircraft_cache = {"at": 0.0, "items": []}
-_home_location_cache = {"at": 0.0, "lat": 45.794, "lon": 21.222}
+# No built-in fallback location: a default would be someone's real home, and wrong for
+# everyone else. Home Assistant's zone.home is the only source.
+_home_location_cache = {"at": 0.0, "lat": None, "lon": None}
 _weather_cache = {}
 _calendar_cache = {}
 _racing_cache = {}
@@ -328,6 +330,8 @@ async def fetch_overhead_aircraft(session, radius_km=35.0):
         return _aircraft_cache["items"]
 
     lat, lon = await get_home_coordinates(session)
+    if lat is None or lon is None:
+        return []                   # no home location from Home Assistant: nothing to look around
     radius_km = max(5.0, min(150.0, float(radius_km or 35.0)))
     d_lat = radius_km / 111.0
     cos_lat = max(0.01, math.cos(math.radians(lat)))
